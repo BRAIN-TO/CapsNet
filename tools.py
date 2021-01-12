@@ -6,6 +6,7 @@ Contains helper functions
 
 In this script:
 -squash
+-arg_2_list
 '''
 
 def squash(inputs, axis=-1):
@@ -15,12 +16,13 @@ def squash(inputs, axis=-1):
     almost zero and long vectors get shrunk to a length of slighly below 1
 
     Args:
-        inputs (tensor): A tensor of input vectors to squash 
+        inputs (tensor): A tensor of input vectors to squash. Note if inputs,
+            are capsules, must flatten capsule matrices into vectors first
         axis (int): The axis along which to do the norm calculation. Default
             is the last axis
     '''
-    caps_norm = tf.norm(input_capsules, axis=axis, keepdims=True)
-    return tf.square(caps_norm)/(1 + tf.square(caps_norm)) * (inputs/caps_norm)
+    inputs_norm = tf.norm(inputs, axis=axis, keepdims=True)
+    return tf.square(inputs_norm)/(1 + tf.square(inputs_norm)) * (inputs/inputs_norm)
 
 def arg_2_list(input_arg, n=2, fill='repeat'):
     '''Takes an argument and converts it into a list of length n
@@ -46,17 +48,17 @@ def arg_2_list(input_arg, n=2, fill='repeat'):
     elif tf.shape(input_arg) == 1: # Input arg is a
         output = list()
         if fill == 'repeat':
-            output[i] = input_arg[0] for i in range(n)
+            output[i] = [input_arg[0] for i in range(n)]
         else: # fill == ones
-            output = 1 for i in range(n)
+            output = [1 for i in range(n)]
             output[0] = input_arg[0]
         return output
     elif type(input_arg) == int:
         output = list()
         if fill == 'repeat':
-            output[i] = input_arg for i in range(n)
+            output[i] = [input_arg for i in range(n)]
         else: # fill == ones
-            output = 1 for i in range(n)
+            output = [1 for i in range(n)]
             output[0] = input_arg
         return output
     else:

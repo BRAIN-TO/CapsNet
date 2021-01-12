@@ -5,6 +5,7 @@ from tensorflow.keras import layers
 import numpy as np
 # Custom Imports
 import tools
+import routing
 
 
 '''Layers
@@ -16,9 +17,10 @@ In this file:
 -PrimaryCaps2D
 -ConvCaps2D
 
-Potential TO-DO's:
+TO-DO:
+-Add discriminative learning for log priors in dynamic routing algorithm
 -Support the use of a bias in conv caps
--potentially move the get_votes and get_pose_blocks methods into tools
+-Potentially move the get_votes and get_pose_blocks methods into tools
     in order to make this file more readable
 '''
 
@@ -202,8 +204,12 @@ class PrimaryCaps2D(layers.Layer):
             capsule_activations = tf.sigmoid(conv)
 
         else: # Use squash method
+            # Flatten capsule poses into vectors
+            shape = tf.shape(capsule_poses)
+            vectors = tf.reshape(capsule_poses, shape=shape[0:-2] + [shape[-1]*shape[-2]])
+
             # Use squash function on capsule poses
-            pose_squashed = tools.squash(capsule_poses)
+            pose_squashed = tools.squash(vectors)
 
             # Calculate length of each capsule vector
             capsule_activations = tf.norm(pose_squashed, axis=-1) 
@@ -466,27 +472,39 @@ class ConvCaps2D(layers.Layer):
             inputs, 
             num_or_size_splits=[input_caps_dim[-1], 1],
             axis=-1
-            ) # Activation shape: [batch_size, im_height, im_width, num_input_channels, input_caps_dim[0], 1]
+            ) # Activation shape: [batch_size, input_height, input_width, num_input_channels, input_caps_dim[0], 1]
         
         input_activations = input_activations[:, :, :, :, 0, :] # Reduce repeated values back down to one value
-        # Activation shape -> [batch_size, im_height, im_width, num_input_channels, 1, 1]
+        # Activation shape -> [batch_size, input_height, input_width, num_input_channels, 1, 1]
 
         input_activations = tf.reshape(input_activations, [-1, input_shape[1], input_shape[2], input_shape[3]]) # Just getting rid of the extra two dims at end
 
-        # input poses shape [batch_size, im_height, im_width, num_input_channels, input_caps_dim[0], input_caps_dim[1]]
-        # Input activations shape [batch_size, im_height, im_width, num_input_channels]
+        # input poses shape [batch_size, input_height, input_width, num_input_channels, input_caps_dim[0], input_caps_dim[1]]
+        # Input activations shape [batch_size, input_height, input_width, num_input_channels]
 
         # Calculate Votes from Poses
         ##############################
         blocks = self._get_pose_blocks(input_poses)
 
         # Add empty dim to allow multiple output channels
-        # [batch_size, im_h, im_w, k_h, k_w, in_chan, in_caps_dim] -> [batch_size, im_h, im_w, 1, k_h, k_w, in_chan, in_caps_dim]
+        # [batch_size, out_h, out_w, k_h, k_w, in_chan, in_caps_dim] -> [batch_size, out_h, out_w, 1, k_h, k_w, in_chan, in_caps_dim]
         blocks = tf.expand_dims(blocks, axis=3)
 
         votes = tf.matmul(blocks, self.kernel) # [batch_size, im_h, im_w, out_chan, k_h, k_w, in_chan] + out_caps_dim
 
-        # INSERT ROUTING ALGORITHM
+        # Get Image Shape Attributes
+        ##############################
+        shape = tf.shape(votes)
+        im_height = shape[1] # Output height
+        im_width = shape[2] # Output width
+        num_votes_per_capsule = shape[4]*shape[5]*shape[6]
 
-        # Return Output Capsules
-    
+        # Routing
+        ############################
+
+        # Reshape votes, flattening k_h, k_w and in_chan into one dimension
+        votes = tf.reshape(votes, [-1, im_height, im_width, self.num_channels, num_votes_per_capsule] + self.capsule_dim)
+
+        capsules = routing.dynamic_routing(votes)
+
+        return capsules # shape: [batch_size, im_height, im_width, num_out_channels] + capsule_dim
