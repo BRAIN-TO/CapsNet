@@ -15,6 +15,7 @@ project
 
 In this file:
 -PrimaryCaps2D
+-DenseCaps
 -ConvCaps2D
 
 TO-DO:
@@ -35,15 +36,6 @@ class PrimaryCaps2D(layers.Layer):
     
     Note that attributes listed below are only attributes that are defined
     internally and not defined by arguments to the init function.
-
-    Attributes:
-        kernel_dim (tuple): A tuple of 2 values defining the dimensions of
-            the 2d convolution kernel
-        strides (tuple): A tuple of 2 values defining the stride of convolution
-            along each dimension
-        built (boolean): Whether or not the layers build method has been run
-        kernel (tensor): The tensor kernel weights for this layer. Trainable
-        b (tensor): The tensor of biases for this layer. Trainable
     '''
     def __init__(self, num_channels, kernel_size, capsule_dim, stride=1, padding='same', activation='sigmoid', name=None, kernel_initializer='he_normal' **kwargs):
         '''A Two Dimensional Primary Capsule Layer 
@@ -234,20 +226,132 @@ class PrimaryCaps2D(layers.Layer):
 
         return capsules
 
+class DenseCaps(layer.Layer):
+    '''A Dense Layer For Capsules
+
+    Uses a set of weights to calculate votes from input capsules. Similar
+    to a fully connected layer, each input capsule is connected (casts a vote)
+    to each output/parent capsule. Routing is then used to generate the 
+    output capsules from the votes.
+    '''
+    def __init__(self, num_capsules, capsule_dim, routing='EM', activation='sigmoid', name=None, **kwargs):
+        '''A Dense Layer for Capsules
+
+        A fully connected capsule layer that uses routing to generate 
+        higher level capsules from a previous capsule layer.
+
+        Args:
+            num_channels (int): The number of capsules in the layer
+            capsule_dim (int or list): The dimensionality of capsule
+                'poses' in this layer. Does not include the capsule
+                activation value. Capsules can be either vectors or matrices.
+                If given an int will treat capsules as a vector, if given
+                a list or tuple of two values, will treat the capsules
+                as matrices.
+            routing (str): The kind of routing to use in this layer. Either
+                'dynamic' or 'EM'
+            activation (str): The method to use when calculating the capsule
+                activations (probability of entity existence). Either
+                'squash' or 'sigmoid'. The former uses the squash function
+                on the capsule poses and then takes the length of the resultant
+                vector. The latter uses the sigmoid function on a weighted
+                sum of the activations in the previous layer.
+            name (str): A name for the layer
+            **kwargs: Arbitrary keyword arguments for keras.layers.Layer()   
+        '''
+
+        super(DenseCaps, self).__init__(**kwargs)
+
+        # Check inputs
+        assert activation == 'squash' or 'sigmoid', 'Was expecting activation' \
+            'to be either squash or sigmoid'
+        assert routing == 'EM' or 'dynamic', 'Was expecting routing' \
+            'argument to be either dynamic or EM'
+        assert tf.shape(capsule_dim) < 3, 'Capsules can be either vectors or matrices,' \
+            'was expecting a capsule_dim no longer than 2 dimensions'
+        assert type(num_capsules) == int, 'num_capsules must be an integer'
+
+        self.num_capsules = num_capsules
+        self.capsule_dim = capsule_dim
+        self.routing = routing
+        self.activation = activation
+        self.built = False
+
+    def build(self, input_shape):
+        '''Builds the dense capsule layer
+
+        Args:
+            input_shape (tensor): The shape of the capsule inputs. For 
+                now the inputs should be from a convolutional capsule layer
+                hence should have shape
+                    [batch_size, im_height, im_width, input_channels] + input_caps_dim
+        '''
+        input_caps_dim = input_shape[-2:]
+        w_shape, self.trans_in, self.trans_out = tools.get_weight_matrix(input_caps_dim, self.capsule_dim)
+
+        self.w = self.add_weight(
+            name='w',
+            shape=[self.num_capsules, input_shape[1], input_shape[2], input_shape[3]] + w_shape,
+            trainable=True
+        )
+
+        # Potentially add bias later
+
+        self.built = True
+
+    def call(self, inputs):
+        '''Uses routing to generate parent capsules
+
+        Multiplies inputs by wieghts to get votes and then uses routing
+        to transform votes into parent capsules
+        
+        Args:
+            inputs (tensor): The input capsules to the layer. For now the
+                inputs should be from a convolutional capsule layer and
+                hence should have shape
+                    [batch_size, im_height, im_width, input_channels] + input_caps_dim
+        '''
+        # Calculate Votes
+        ##########################
+
+        # Add dim for output channels
+        inputs = tf.expand_dims(inputs, axis=1) # shape: [batch_size, 1, im_h, im_w, in_chan] + in_caps_dim
+
+        if tf.trans_in == True: # Transpose last two dimensions (in_caps_dim)
+            inputs = tf.transpose(inputs, [0, 1, 2, 3, 4, 6, 5])
+
+        votes = tf.matmul(inputs, self.w) 
+
+        if tf.trans_out == True: # Transpose last two dimensions (out_caps_dim)
+            votes = tf.transpose(votes, [0, 1, 2, 3, 4, 6, 5])
+
+        # votes shape [batch_size, num_capsules, im_h, im_w, in_chan] + out_caps_dim
+
+        # Routing
+        #######################
+        votes_shape = tf.shape(votes)
+        num_votes_per_caps = votes_shape[2]*votes_shape[3]*votes_shape[4] # im_h * im_w * in_chan
+        votes = tf.reshape(votes, shape=[-1, self.num_capsules, num_votes_per_caps] + self.capsule_dim)
+        # votes new shape [batch_size, num_capsules, im_h * im_w * in_chan] + out_caps_dim
+
+        if self.routing == 'dynamic':
+            capsules = routing.dynamic_routing(votes)
+        elif self.routing == 'EM'
+            raise ValueError('EM Routing Not Yet Implemented. Please select dynamic instead')
+        else:
+            raise ValueError('Was expecting either EM or dynamic for routing argument')
+
+        return capsules # Shape [batch_size, num_capsules] + output_caps_dim
+
 class ConvCaps2D(layers.Layer):
     '''A Two Dimensional Convolutional Capsule Layer
 
-    A convolutional capsule layer that uses routing from a previous layer
-    of capsules to generate its own capsules. The inputs to this layer must
-    be in capsule format.
-
-    Note thast attributes listed below are only attributes that are defined
-    internally and not defined by arguments to the init function.
-
-    Attributes:
-
+    A convolutional capsule layer that uses a kernel/mask of weights to
+    calculate 'blocks' of votes using the capsules from a previous layer.
+    It then uses routing to generate its own capsules from these votes. 
+    The inputs to this layer must be in capsule format.
     '''
-    def __init__(self, num_channels, kernel_size, capsule_dim, routing='EM', strides=1, padding='same', name=None, kernel_initializer='he_normal' **kwargs):
+    def __init__(self, num_channels, kernel_size, capsule_dim, routing='EM', strides=1, padding='same', activation='sigmoid', name=None, kernel_initializer='he_normal' **kwargs):
         '''A Two Dimensional Convolutional Capsule Layer
 
         A convolutional capsule layer that uses routing to generate higher
@@ -267,6 +371,8 @@ class ConvCaps2D(layers.Layer):
                 a list of integers describing the dimensions of a tuple or 
                 pose matrix, which will in turn be flattened into a vector
                 during computation. Eg. capsdim = (4, 4) -> 16
+            routing (str): The kind of routing to use in this layer. Either
+                'dynamic' or 'EM'
             strides (int or list): A list of two integers
                 that specify the stride of convolution along the height
                 and width respectively. Can be a single integer specifying
@@ -275,6 +381,12 @@ class ConvCaps2D(layers.Layer):
                 valid means no padding, same means even padding along
                 both dimensions such that the output of the convolution
                 is the same shape as the input
+            activation (str): The method to use when calculating the capsule
+                activations (probability of entity existence). Either
+                'squash' or 'sigmoid'. The former uses the squash function
+                on the capsule poses and then takes the length of the resultant
+                vector. The latter uses the sigmoid function on a weighted
+                sum of the activations in the previous layer.
             name (str): A name for the layer
             kernel_initializer (str): A string identifier for one of the 
                 keras initializers. See the following documentation.
@@ -293,6 +405,8 @@ class ConvCaps2D(layers.Layer):
             'to be either squash or sigmoid'
         assert tf.shape(capsule_dim) < 3, 'Capsules can be either vectors or matrices,' \
             'was expecting a capsule_dim no longer than 2 dimensions'
+        assert routing == 'EM' or 'dynamic', 'Was expecting routing' \
+            'argument to be either dynamic or EM'
 
         # Set class attributes
         ######################################
@@ -328,27 +442,7 @@ class ConvCaps2D(layers.Layer):
 
         # Determine the shape of the weight matrices, and whether or not
         # The inputs or outputs need to be transposed to get desired shape
-        if input_caps_dim[0] == self.capsule_dim[0]:
-            w_shape = [input_caps_dim[1], self.capsule_dim[1]]
-            self.trans_in = False
-            self.trans_out = False
-        elif input_caps_dim[0] == self.capsule_dim[1]:
-            w_shape = [input_caps_dim[1], self.capsule_dim[0]]
-            self.trans_in = False
-            self.trans_out = True
-        elif input_caps_dim[1] == self.capsule_dim[0]:
-            w_shape = [input_caps_dim[0], self.capsule_dim[1]]
-            self.trans_in = True
-            self.trans_out = False
-        elif input_caps_dim[1] == self.capsule_dim[1]:
-            w_shape = [input_caps_dim[0], self.capsule_dim[0]]
-            self.trans_in = True
-            self.trans_out = True
-        else:
-            # matmul: input_caps * weights = output_caps
-            # matmul shapes: [k, n] * [n, c] -> [k, c]
-            # Hence input and output caps must share one dimension
-            raise ValueError('Input capsule_dim must share one dimension with output capsule_dim')
+        w_shape, self.trans_in, self.trans_out = tools.get_weight_matrix(input_caps_dim, self.capsule_dim)
 
         # Define Trainable Variables
         self.kernel = self.add_weight( 
@@ -358,13 +452,7 @@ class ConvCaps2D(layers.Layer):
             trainable=True
         ) 
 
-        # Not part of the original paper, will potentially add bias later
-        # self.b = self.add_weight(
-        #     name='bias',
-        #     shape=[self.num_channels] + w_shape,
-        #     initializer=self.kernel_initializer,
-        #     trainable=True
-        # )
+        # Potentially add a bias term later
 
         self.built = True
 
@@ -504,7 +592,11 @@ class ConvCaps2D(layers.Layer):
 
         # Reshape votes, flattening k_h, k_w and in_chan into one dimension
         votes = tf.reshape(votes, [-1, im_height, im_width, self.num_channels, num_votes_per_capsule] + self.capsule_dim)
-
-        capsules = routing.dynamic_routing(votes)
+        if self.routing == 'dynamic':
+            capsules = routing.dynamic_routing(votes)
+        elif self.routing == 'EM'
+            raise ValueError('EM Routing Not Yet Implemented. Please select dynamic instead')
+        else:
+            raise ValueError('Was expecting either EM or dynamic for routing argument')
 
         return capsules # shape: [batch_size, im_height, im_width, num_out_channels] + capsule_dim
