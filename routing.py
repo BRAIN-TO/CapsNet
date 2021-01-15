@@ -10,7 +10,6 @@ In This File:
 -Dynamic Routing
 
 TO-DO:
--Finish Dynamic Routing
 -EM Routing
 -Explore Leaky Routing
 '''
@@ -31,15 +30,17 @@ def dynamic_routing(votes, num_iter=3, priors=None):
             in equal couplind coefficients. Should have same shape as votes
     '''
     # Flatten capsules into vectors
-    input_shape = tf.shape(votes)
+    input_shape = votes.shape
     vec_len = input_shape[-1] * input_shape[-2]
-    u = tf.reshape(votes, shape=input_shape[0:-2] + [vec_len])
+    u = tf.reshape(votes, shape=tf.concat([[-1], list(input_shape[1:-2]), [vec_len]], axis=-1))
 
     # Only 1 prior per vote so get rid of caps dims and replace with dim 1
-    b_shape = input_shape[0:-2] + [1]
+    b_shape = list(input_shape[1:-2]) # Add middle dimensions
+    b_shape.insert(0, tf.shape(votes)[0]) # Replace None with placeholder for batch_size dim
+    b_shape.append(1) # append 1
     
     if priors == None: # Default, all priors zero, hence all coupling coeffs equal
-        b = tf.constant(0, shape=b_shape, dtype=tf.float32)
+        b = tf.fill(b_shape, value=0.0)
     else: # Custom priors given
         if tf.shape(priors) == b_shape:
             b = priors
@@ -60,6 +61,10 @@ def dynamic_routing(votes, num_iter=3, priors=None):
         b = b + a # Update priors
 
     # reshape vectors back into two dimensional capsules.
-    capsules = tf.reshape(v, shape=input_shape[0:-3] + [input_shape[-2], input_shape[-1]])
+    shape = list(input_shape[1:-3]) # Get prefix dimensions
+    shape.insert(0, -1) # Insert -1 so that batch size remains the same
+    shape.append(input_shape[-2]) # Append the first pose dimension
+    shape.append(input_shape[-1]) # Append second pose dimension
+    capsules = tf.reshape(v, shape=shape) # Reshape vectors back into 2d
 
     return capsules

@@ -49,17 +49,15 @@ def arg_2_list(input_arg, n=2, fill='repeat'):
         return list(input_arg)
     # Input arg is in list form but only has length 1, repeat value n times
     elif tf.shape(input_arg) == 1: # Input arg is a a list or tuple of length 1
-        output = list()
         if fill == 'repeat':
-            output[i] = [input_arg[0] for i in range(n)]
+            output = [input_arg[0] for i in range(n)]
         else: # fill == ones
             output = [1 for i in range(n)]
             output[0] = input_arg[0]
         return output
     elif type(input_arg) == int: # Input is an int
-        output = list()
         if fill == 'repeat':
-            output[i] = [input_arg for i in range(n)]
+            output = [input_arg for i in range(n)]
         else: # fill == ones
             output = [1 for i in range(n)]
             output[0] = input_arg
@@ -87,7 +85,6 @@ def get_weight_matrix(input_caps_dim, output_caps_dim):
         trans_output (bool): Whether or not the output capsules need to
             be transposed after the operation
     '''
-
     if input_caps_dim[0] == output_caps_dim[0]:
         w_shape = [input_caps_dim[1], output_caps_dim[1]]
         trans_input = False
@@ -111,3 +108,20 @@ def get_weight_matrix(input_caps_dim, output_caps_dim):
         raise ValueError('Input capsule_dim must share one dimension with output capsule_dim')
 
     return w_shape, trans_input, trans_output
+
+def safe_norm(input, epsilon=1e-7, axis=-1):
+    '''A safe norm function that prevents the value being absolute zero
+    
+    Note this function was borrowed from Parth Rajesh Dedhia's CapsNet
+    implementation
+
+    Args:
+        input (tensor): The tensor of vectors to run the norm function on
+        epsilon (float): A near zero value to add to the norm function
+            to prevent absolute zero values
+        axis (int): The axis of input upon which to apply to norm function
+    '''
+
+    out_ = tf.reduce_sum(tf.square(input), axis=axis, keepdims=True)
+    return tf.sqrt(out_ + epsilon)
+
