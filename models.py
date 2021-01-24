@@ -1,7 +1,11 @@
+# Public Imports
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+import numpy as np
+# Custom Imports
 import layers as caps_layers
+
 
 '''Models
 
@@ -9,8 +13,10 @@ Contains various model archetectures using capsule layers
 
 In this file:
 -CapsNet
-'''
 
+TO-DO:
+'''
+        
 class CapsNet(keras.Model):
     '''The original CapsNet model designed for MNIST
 
@@ -32,8 +38,8 @@ class CapsNet(keras.Model):
 
         # Later check to see if these will work with keras.Sequential
         self.conv = layers.Conv2D(filters=256, kernel_size=9, strides=(1, 1), padding='valid', activation='relu')
-        self.primary = caps_layers.PrimaryCaps2D(num_channels=32, kernel_size=9, capsule_dim=8, stride=2, padding='valid', activation='squash')
-        self.dense = caps_layers.DenseCaps(num_capsules=10, capsule_dim=16, routing='dynamic', activation='squash')
+        self.primary = caps_layers.PrimaryCaps2D(num_channels=32, kernel_size=9, capsule_dim=8, strides=2, padding='valid', activation='squash')
+        self.dense = caps_layers.DenseCaps(num_capsules=10, capsule_dim=16, routing='dynamic', activation='norm')
 
         self.decoder = keras.Sequential(
             [
@@ -43,7 +49,22 @@ class CapsNet(keras.Model):
             ],
             name='decoder'
         )
+
+    def call(self, inputs): # Define this method solely so that we can build model and print model summary
+        # Propagate through encoder
+        conv_out = self.conv(inputs)
+        pose1, a1 = self.primary(conv_out)
+        pose2, a2 = self.dense([pose1, a1])
+
+        pose_masked = tools.mask_output_capsules(a2, pose2, weighted=False)
+        
+        # Reconstruct image
+        decoder_input = tf.reshape(pose_masked, [-1, pose_shape[1] * pose_shape[2] * pose_shape[3]])
+        recon_images = self.decoder(decoder_input)
+
+        return  a2, pose2, recon_images
     
+    @tf.function
     def train_step(self, data):
         x, y = data # x are input images, y are ohe labels
 
@@ -55,11 +76,7 @@ class CapsNet(keras.Model):
             pose1, a1 = self.primary(conv_out)
             pose2, a2 = self.dense([pose1, a1])
 
-            # Mask outputs
-            pose_shape = pose2.shape # pose shape [batch_size, num_capsules] + caps_dim
-            mask = tf.expand_dims(y, axis=-1) # mask shape [batch_size, num_classes=num_capsules, 1]
-            pose_flat = tf.reshape(pose2, [-1, pose_shape[1], pose_shape[-2] * pose_shape[-1]]) # flatten pose matrices into vectors
-            pose_masked = tf.multiply(pose_flat, mask) # shape [batch_size, num_capsules] + caps_dim
+            pose_masked = tools.mask_output_capsules(y, pose2, weighted=False)
 
             # Reconstruct image
             decoder_input = tf.reshape(pose_masked, [-1, pose_shape[1] * pose_shape[2] * pose_shape[3]])
@@ -76,11 +93,15 @@ class CapsNet(keras.Model):
         # Optimize weights
         self.optimizer.apply_gradients(zip(gradients, training_vars))
 
-        # Update accuracy
+        # Update metrics
         self.compiled_metrics.update_state(y, a2)
 
-        return {m.name : m.result() for m in self.metrics}
+        # Return loss and other metrics
+        output_dict = {m.name : m.result() for m in self.metrics}
+        output_dict['loss'] = loss
+        return output_dict
 
+    @tf.function
     def test_step(self, data):
         x, y = data # x are input images, y are ohe labels
 
@@ -89,42 +110,32 @@ class CapsNet(keras.Model):
         pose1, a1 = self.primary(conv_out)
         pose2, a2 = self.dense([pose1, a1])
 
-        # Mask outputs with predicted classes 
-        pose_shape = pose2.shape # pose shape [batch_size, num_capsules] + caps_dim
-        mask = tf.expand_dims(y, axis=-1) # mask shape [batch_size, num_classes=num_capsules, 1]
-        pose_flat = tf.reshape(pose2, [-1, pose_shape[1], pose_shape[-2]*pose_shape[-1]]) # flatten pose matrices into vectors
-        pose_masked = tf.multiply(pose_flat, mask) # shape [batch_size, num_capsules] + caps_dim
+        pose_masked = tools.mask_output_capsules(a2, pose2, weighted=False)
 
-        # Update accuracy
+        # Update metrics
         self.compiled_metrics.update_state(y, a2)
 
-        return {m.name : m.result() for m in self.metrics}
+        # Reconstruct image
+        decoder_input = tf.reshape(pose_masked, [-1, pose_shape[1] * pose_shape[2] * pose_shape[3]])
+        recon_images = self.decoder(decoder_input)
 
+        # Calculate loss
+        x_flat = tf.reshape(x, [-1, tf.math.reduce_prod(tf.shape(x)[1:])]) # flatten input images
+        loss = self.loss(a2, recon_images, x_flat, y)
 
-    def predict(self, data, return_poses=False, return_reconstructions=False):
-        x, y = data # x are input images, y are ohe labels
+        # Return loss and other metrics
+        output_dict = {m.name : m.result() for m in self.metrics}
+        output_dict['loss'] = loss
+        return output_dict
 
-        # Propagate through encoder
-        conv_out = self.conv(x)
-        pose1, a1 = self.primary(conv_out)
-        pose2, a2 = self.dense([pose1, a1])
+    @tf.function(
+        input_signature=[tf.TensorSpec(shape=(None, 10), dtype=tf.float32), tf.TensorSpec(shape=(None, 10, 16, 1), dtype=tf.float32)]
+    )
+    def reconstruct_image(self, capsule_activations, capsule_poses):
+        pose_masked = tools.mask_output_capsules(capsule_activations, capsule_poses, weighted=False)
 
-        # Mask outputs with predicted classes 
-        pose_shape = pose2.shape # pose shape [batch_size, num_capsules] + caps_dim
-        mask = tf.expand_dims(y, axis=-1) # mask shape [batch_size, num_classes=num_capsules, 1]
-        pose_flat = tf.reshape(pose2, [-1, pose_shape[1], pose_shape[-2]*pose_shape[-1]]) # flatten pose matrices into vectors
-        pose_masked = tf.multiply(pose_flat, mask) # shape [batch_size, num_capsules] + caps_dim
+        # Reconstruct image
+        decoder_input = tf.reshape(pose_masked, [-1, pose_shape[1] * pose_shape[2] * pose_shape[3]])
+        recon_images = self.decoder(decoder_input)
 
-        if return_reconstructions == True:
-            # Reconstruct image
-            decoder_input = tf.reshape(pose_masked, [-1, pose_shape[1] * pose_shape[2] * pose_shape[3]])
-            recon_images = self.decoder(decoder_input)
-            
-            if return_poses == True:
-                return  a2, pose2, recon_images
-            else:
-                return a2, recon_images
-        elif return_poses == True:
-            return a2, pose2
-        else:
-            return a2
+        return recon_images

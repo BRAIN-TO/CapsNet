@@ -125,3 +125,36 @@ def safe_norm(input, epsilon=1e-7, axis=-1):
     out_ = tf.reduce_sum(tf.square(input), axis=axis, keepdims=True)
     return tf.sqrt(out_ + epsilon)
 
+def mask_output_capsules(labels, capsule_poses, weighted=False):
+    '''Masks the output capsules using a set of labels
+
+    Masks the output capsules by multiplying them by the labels. If 
+    weighted is false, will convert labels to a binary mask by making
+    the max label 1 and all other labels 0
+
+    labels (tensor): A tensor containing either the activations or the 
+        ground truth labels to mask the output capsules by
+    capsule_poses (tensor): A tensor containing the capsule poses
+    weighted (boolean): If true converts labels to a binary mask
+    '''
+
+    if weighted:    
+         mask = tf.expand_dims(labels, axis=-1) # shape: [batch_size, num_caps, 1]
+    else: # Convert labels to binary labels
+        # Note that if labels are already binary this should not affect outcome
+        # Create Mask with Predicted Class
+        maxes = tf.equal(tf.reduce_max(labels, axis=-1, keepdims=True), labels) # Get boolean tensor with True for prediction and False otherwise
+        mask = tf.where(
+            maxes, 
+            tf.constant(1, dtype=tf.float32), # 1 for max activation
+            tf.constant(0, dtype=tf.float32) # 0 other capsules
+        )
+        mask = tf.expand_dims(mask, axis=-1) # shape: [batch_size, num_caps, 1]
+
+     # Apply mask to pose
+    pose_shape = capsule_poses.shape # pose shape [batch_size, num_capsules] + caps_dim
+    pose_flat = tf.reshape(capsule_poses, [-1, pose_shape[1], pose_shape[-2] * pose_shape[-1]]) # flatten pose matrices into vectors
+    pose_masked = tf.multiply(pose_flat, mask) # shape [batch_size, num_capsules] + caps_dim
+
+    return pose_masked
+

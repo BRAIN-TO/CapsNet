@@ -20,12 +20,13 @@ In this file:
 
 TO-DO:
 -Add different activation methods for convcaps and densecaps
--Change dense layer to work with having previous layer also be dense by
+-Change dense layer to work with having previous layer also being dense by
 adding a flatten layer
 -Add discriminative learning for log priors in dynamic routing algorithm
 -Support the use of a bias in conv caps
 -Potentially move the get_votes and get_pose_blocks methods into tools
     in order to make this file more readable
+-Potentially switch return order of pose and activations
 '''
 
 class PrimaryCaps2D(layers.Layer):
@@ -40,7 +41,7 @@ class PrimaryCaps2D(layers.Layer):
     Note that attributes listed below are only attributes that are defined
     internally and not defined by arguments to the init function.
     '''
-    def __init__(self, num_channels, kernel_size, capsule_dim, stride=1, padding='valid', activation='sigmoid', kernel_initializer='he_normal', **kwargs):
+    def __init__(self, num_channels, kernel_size, capsule_dim, strides=1, padding='valid', activation='sigmoid', kernel_initializer='glorot_uniform', **kwargs):
         '''A Two Dimensional Primary Capsule Layer 
         
         A convolutional capsule layer that converts activations from a 
@@ -58,7 +59,7 @@ class PrimaryCaps2D(layers.Layer):
                 If given an int will treat capsules as a vector, if given
                 a list or tuple of two values, will treat the capsules
                 as matrices.
-            stride (int or list): A list of two integers
+            strides (int or list): A list of two integers
                 that specify the stride of convolution along the height
                 and width respectively. Can be a single integer specifying
                 the same value for both spatial dimensions
@@ -68,10 +69,10 @@ class PrimaryCaps2D(layers.Layer):
                 is the same shape as the input
             activation (str): The method to use when calculating the capsule
                 activations (probability of entity existence). Either
-                'squash' or 'sigmoid'. The former uses the squash function
-                on the capsule poses and then takes the length of the resultant
-                vector. The latter uses the sigmoid function on a weighted
-                sum of the activations in the previous layer.
+                'squash', 'sigmoid' or 'norm'. norm uses the length of the
+                vector as the activation. squash uses the squash function
+                and then takes the length. sigmoid uses the sigmoid function 
+                on the weighted sum of the capsule poses from the previous layer
             name (str): A name for the layer
             kernel_initializer (str): A string identifier for one of the 
                 keras initializers. See the following documentation.
@@ -84,10 +85,10 @@ class PrimaryCaps2D(layers.Layer):
         ######################################
         assert len(tf.shape(kernel_size)) < 3, 'kernel_size argument is too long.' \
             'Was expecting an int or list of size 2'
-        assert len(tf.shape(stride)) < 3, 'stride argument is too long' \
+        assert len(tf.shape(strides)) < 3, 'stride argument is too long' \
             'Was expecting an int or list of size 2'
-        assert activation == 'squash' or 'sigmoid', 'Was expecting activation' \
-            'to be either squash or sigmoid'
+        assert activation == 'squash' or 'sigmoid' or 'norm', 'Got unexpected' \
+            'activation type'
         assert len(tf.shape(capsule_dim)) < 3, 'Capsules can be either vectors or matrices,' \
             'was expecting a capsule_dim no longer than 2 dimensions'
 
@@ -96,7 +97,7 @@ class PrimaryCaps2D(layers.Layer):
         self.num_channels = num_channels
         self.kernel_dim = tuple(tools.arg_2_list(kernel_size, n=2)) # Convert to tuple of length 2
         self.capsule_dim = tools.arg_2_list(capsule_dim, n=2, fill='ones')
-        self.strides = tuple(tools.arg_2_list(stride, n=2)) # Convert to tuple of length 2
+        self.strides = tuple(tools.arg_2_list(strides, n=2)) # Convert to tuple of length 2
         self.padding = padding
         self.activation = activation
         self.kernel_initializer = keras.initializers.get(kernel_initializer)
@@ -197,16 +198,17 @@ class PrimaryCaps2D(layers.Layer):
             # Apply sigmoid function
             capsule_activations = tf.sigmoid(conv)
 
-        else: # Use squash method
+        else: # Use squash or norm method
             # Flatten capsule poses into vectors
             shape = capsule_poses.shape
             vectors = tf.reshape(capsule_poses, shape=[-1, shape[1], shape[2], shape[3], shape[4]*shape[5]])
 
-            # Use squash function on capsule poses
-            pose_squashed = tools.squash(vectors)
+            if self.activation == 'squash':
+                # Use squash function on capsule poses
+                vectors = tools.squash(vectors)
 
             # Calculate length of each capsule vector
-            capsule_activations = tf.norm(pose_squashed, axis=-1) 
+            capsule_activations = tf.norm(vectors, axis=-1) 
 
         # capsule_activations shape:
         # [batch_size, im_height, im_width, num_channels]
@@ -214,6 +216,27 @@ class PrimaryCaps2D(layers.Layer):
         # capsules pose shape:
         # [batch_size, im_height, im_width, num_channels, caps_dim[0], caps_dim[1]]
         return [capsule_poses, capsule_activations]
+
+    def get_config(self):
+        '''Returns the layer configuration
+
+        Allows the layer to be serializable
+
+        Returns:
+            config (dict): Dictionary containing th input arguments to
+                the layer
+        '''
+        config = {
+            'num_channels' : self.num_channels,
+            'kernel_size' : self.kernel_dim,
+            'capsule_dim': self.capsule_dim,
+            'strides': self.strides,
+            'padding': self.padding,
+            'activation': self.activation,
+            'kernel_initializer': self.kernel_initializer,
+        }
+        base_config = super(PrimaryCaps2D, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
 
 class DenseCaps(layers.Layer):
     '''A Dense Layer For Capsules
@@ -223,7 +246,7 @@ class DenseCaps(layers.Layer):
     to each output/parent capsule. Routing is then used to generate the 
     output capsules from the votes.
     '''
-    def __init__(self, num_capsules, capsule_dim, routing='EM', activation='squash', name=None, **kwargs):
+    def __init__(self, num_capsules, capsule_dim, routing='EM', activation='squash', initializer='random_normal', **kwargs):
         '''A Dense Layer for Capsules
 
         A fully connected capsule layer that uses routing to generate 
@@ -241,10 +264,10 @@ class DenseCaps(layers.Layer):
                 'dynamic' or 'EM'
             activation (str): The method to use when calculating the capsule
                 activations (probability of entity existence). Either
-                'squash' or 'sigmoid'. The former uses the squash function
-                on the capsule poses and then takes the length of the resultant
-                vector. The latter uses the sigmoid function on a weighted
-                sum of the activations in the previous layer.
+                'squash', 'sigmoid' or 'norm'. norm uses the length of the
+                vector as the activation. squash uses the squash function
+                and then takes the length. sigmoid uses the sigmoid function 
+                on the weighted sum of the capsule poses from the previous layer
             name (str): A name for the layer
             **kwargs: Arbitrary keyword arguments for keras.layers.Layer()   
         '''
@@ -252,8 +275,8 @@ class DenseCaps(layers.Layer):
         super(DenseCaps, self).__init__(**kwargs)
 
         # Check inputs
-        assert activation == 'squash' or 'sigmoid', 'Was expecting activation' \
-            'to be either squash or sigmoid'
+        assert activation == 'squash' or 'sigmoid' or 'norm', 'Got unexpected' \
+            'activation type'
         assert routing == 'EM' or 'dynamic', 'Was expecting routing' \
             'argument to be either dynamic or EM'
         assert len(tf.shape(capsule_dim)) < 3, 'Capsules can be either vectors or matrices,' \
@@ -265,6 +288,7 @@ class DenseCaps(layers.Layer):
         self.routing = routing
         self.activation = activation
         self.built = False
+        self.initializer = keras.initializers.get(initializer)
 
     def build(self, input_shapes):
         '''Builds the dense capsule layer
@@ -283,6 +307,7 @@ class DenseCaps(layers.Layer):
         self.w = self.add_weight(
             name='w',
             shape=[self.num_capsules, pose_shape[1], pose_shape[2], pose_shape[3], w_shape[0], w_shape[1]],
+            initializer=self.initializer,
             trainable=True
         )
 
@@ -340,25 +365,43 @@ class DenseCaps(layers.Layer):
             raise ValueError('Was expecting either EM or dynamic for routing argument')
 
         # Calculate new capsule activations
-        if self.activation == 'squash':
+        if self.activation == 'activation':
+            raise ValueError('Sigmoid activation not yet supported for DenseCaps')
+        else:
             # Flatten capsule poses into vectors
             shape = capsule_poses.shape
             vectors = tf.reshape(capsule_poses, shape=[-1, shape[1], shape[2]*shape[3]])
-
-            # Use squash function on capsule poses
-            pose_squashed = tools.squash(vectors)
+            if self.activation == 'squash':
+                # Use squash function on capsule poses
+                vectors = tools.squash(vectors)
 
             # Calculate length of each capsule vector
-            capsule_activations = tf.norm(pose_squashed, axis=-1)
-        else:
-            raise ValueError('Sigmoid activation not yet supported for DenseCaps')
+            capsule_activations = tf.norm(vectors, axis=-1)
+            
 
         # pose shape [batch_size, num_capsules] + output_caps_dim
         # activation shape [batch_size, num_capsules]
 
         return [capsule_poses, capsule_activations]
 
+    def get_config(self):
+        '''Returns the layer configuration
 
+        Allows the layer to be serializable
+
+        Returns:
+            config (dict): Dictionary containing th input arguments to
+                the layer
+        '''
+        config = {
+            'num_capsules': self.num_capsules,
+            'capsule_dim': self.capsule_dim,
+            'routing': self.routing,
+            'activation': self.activation,
+            'initializer': self.initializer
+        }
+        base_config = super(DenseCaps, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
 
 
 class ConvCaps2D(layers.Layer):
@@ -369,7 +412,7 @@ class ConvCaps2D(layers.Layer):
     It then uses routing to generate its own capsules from these votes. 
     The inputs to this layer must be in capsule format.
     '''
-    def __init__(self, num_channels, kernel_size, capsule_dim, routing='EM', strides=1, padding='same', activation='sigmoid', name=None, kernel_initializer='he_normal', **kwargs):
+    def __init__(self, num_channels, kernel_size, capsule_dim, routing='EM', strides=1, padding='same', activation='sigmoid', kernel_initializer='he_normal', **kwargs):
         '''A Two Dimensional Convolutional Capsule Layer
 
         A convolutional capsule layer that uses routing to generate higher
@@ -425,6 +468,8 @@ class ConvCaps2D(layers.Layer):
             'was expecting a capsule_dim no longer than 2 dimensions'
         assert routing == 'EM' or 'dynamic', 'Was expecting routing' \
             'argument to be either dynamic or EM'
+        assert activation == 'squash' or 'sigmoid' or 'norm', 'Got unexpected' \
+            'activation type'
 
         # Set class attributes
         ######################################
@@ -604,18 +649,40 @@ class ConvCaps2D(layers.Layer):
         else:
             raise ValueError('Was expecting either EM or dynamic for routing argument')
 
-        if self.activation == 'squash':
+        # Calculate new capsule activations
+        if self.activation == 'activation':
+            raise ValueError('Sigmoid activation not yet supported for ConvCaps2D')
+        else:
             # Flatten capsule poses into vectors
-            shape = tf.shape(capsule_poses)
-            vectors = tf.reshape(capsule_poses, shape=shape[0:-2] + [shape[-1]*shape[-2]])
-
-            # Use squash function on capsule poses
-            pose_squashed = tools.squash(vectors)
+            shape = capsule_poses.shape
+            vectors = tf.reshape(capsule_poses, shape=[-1, shape[1], shape[2]*shape[3]])
+            if self.activation == 'squash':
+                # Use squash function on capsule poses
+                vectors = tools.squash(vectors)
 
             # Calculate length of each capsule vector
-            capsule_activations = tf.norm(pose_squashed, axis=-1)
-        else:
-            raise ValueError('Sigmoid activation not yet supported for DenseCaps')
+            capsule_activations = tf.norm(vectors, axis=-1)
 
         return [capsule_poses, capsule_activations]
 
+    def get_config(self):
+        '''Returns the layer configuration
+
+        Allows the layer to be serializable
+
+        Returns:
+            config (dict): Dictionary containing th input arguments to
+                the layer
+        '''
+        config = {
+            'num_channels' : self.num_channels,
+            'kernel_size' : self.kernel_dim,
+            'capsule_dim': self.capsule_dim,
+            'routing': self.routing,
+            'stride': self.strides,
+            'padding': self.padding,
+            'activation': self.activation,
+            'kernel_initializer': self.kernel_initializer,
+        }
+        base_config = super(ConvCaps2D, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
