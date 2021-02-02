@@ -19,6 +19,16 @@ print('Test Set: ', tf.shape(x_test))
 y_train = tf.one_hot(y_train, depth=10)
 y_test = tf.one_hot(y_test, depth=10)
 
+# Create callback for saving model at various checkpoints
+model_checkpoint = keras.callbacks.ModelCheckpoint(
+    'models/CapsNet-mnist/saved_model_{epoch:02d}',
+    save_weights_only=False,
+    monitor='accuracy',
+    save_best_only=False,
+    save_freq='epoch',
+    period=5
+)
+
 acc_metric = keras.metrics.SparseCategoricalAccuracy(name='accuracy')
 model = CapsNet()
 model.compile(
@@ -29,12 +39,13 @@ model.compile(
 
 model.build(x_train.shape)
 print(model.summary())
+model._set_inputs(x_train)
 
-training = model.fit(x=x_train, y=y_train, batch_size=100, epochs=50, verbose=1)
+training = model.fit(x=x_train, y=y_train, batch_size=100, epochs=50, verbose=1, callbacks=[model_checkpoint])
 
 # Save model and model history
-model._set_inputs(x_train)
-model.save('models/CapsNet_mnist/saved_model', save_format='tf')
+
+#model.save('models/CapsNet_mnist/saved_model', save_format='tf')
 
 with open('models/CapsNet_mnist/train-history.json', 'w') as file:
     json.dump(training.history, file)

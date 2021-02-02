@@ -5,6 +5,7 @@ from tensorflow.keras import layers
 import numpy as np
 # Custom Imports
 import layers as caps_layers
+import tools
 
 
 '''Models
@@ -18,28 +19,21 @@ TO-DO:
 '''
         
 class CapsNet(keras.Model):
-    '''The original CapsNet model designed for MNIST
+    '''The original capsule network designed for MNIST
 
     The capsule network from the original paper published in 2017
 
-    S. Sabour, N. Frosst, and G. E. Hinton, “Dynamic Routing Between Capsules,” 
-    in Advances in Neural Information Processing Systems 30, Long Beach, 
-    California, 2017, pp. 3856–3866, Accessed: Oct. 15, 2020.
+    1.Sabour, S., Frosst, N. & Hinton, G. E. Dynamic Routing Between Capsules. 
+    in Advances in Neural Information Processing Systems 30 (eds. Guyon, I. et al.) 
+    3856–3866 (Curran Associates, Inc., 2017).
     '''
     def __init__(self,):
-        '''The original capsule network
-
-        From the 2017 paper 'Dynamic Routing Between Capsules'
-
-        No input arguments as this model has the exact same parameters
-        as the model from the paper
-        '''
         super(CapsNet, self).__init__()
 
-        # Later check to see if these will work with keras.Sequential
+        # Define layers
         self.conv = layers.Conv2D(filters=256, kernel_size=9, strides=(1, 1), padding='valid', activation='relu')
         self.primary = caps_layers.PrimaryCaps2D(num_channels=32, kernel_size=9, capsule_dim=8, strides=2, padding='valid', activation='squash')
-        self.dense = caps_layers.DenseCaps(num_capsules=10, capsule_dim=16, routing='dynamic', activation='norm')
+        self.dense = caps_layers.DenseCaps(num_capsules=10, capsule_dim=16, routing='dynamic', activation='norm', name='class_capsules')
 
         self.decoder = keras.Sequential(
             [
@@ -59,6 +53,7 @@ class CapsNet(keras.Model):
         pose_masked = tools.mask_output_capsules(a2, pose2, weighted=False)
         
         # Reconstruct image
+        pose_shape = pose_masked.shape
         decoder_input = tf.reshape(pose_masked, [-1, pose_shape[1] * pose_shape[2] * pose_shape[3]])
         recon_images = self.decoder(decoder_input)
 
@@ -79,6 +74,7 @@ class CapsNet(keras.Model):
             pose_masked = tools.mask_output_capsules(y, pose2, weighted=False)
 
             # Reconstruct image
+            pose_shape = pose_masked.shape
             decoder_input = tf.reshape(pose_masked, [-1, pose_shape[1] * pose_shape[2] * pose_shape[3]])
             recon_images = self.decoder(decoder_input)
 
@@ -116,6 +112,7 @@ class CapsNet(keras.Model):
         self.compiled_metrics.update_state(y, a2)
 
         # Reconstruct image
+        pose_shape = pose_masked.shape # shape [batch_size, num_caps, caps_dim[0], caps_dim[1]]
         decoder_input = tf.reshape(pose_masked, [-1, pose_shape[1] * pose_shape[2] * pose_shape[3]])
         recon_images = self.decoder(decoder_input)
 
@@ -128,14 +125,98 @@ class CapsNet(keras.Model):
         output_dict['loss'] = loss
         return output_dict
 
-    @tf.function(
+    @tf.function( # Have to decorate function so that it is not lost when saving model using model.save
         input_signature=[tf.TensorSpec(shape=(None, 10), dtype=tf.float32), tf.TensorSpec(shape=(None, 10, 16, 1), dtype=tf.float32)]
     )
     def reconstruct_image(self, capsule_activations, capsule_poses):
         pose_masked = tools.mask_output_capsules(capsule_activations, capsule_poses, weighted=False)
 
         # Reconstruct image
+        pose_shape = pose_masked.shape
         decoder_input = tf.reshape(pose_masked, [-1, pose_shape[1] * pose_shape[2] * pose_shape[3]])
         recon_images = self.decoder(decoder_input)
 
         return recon_images
+
+class MatrixCapsNet(keras.Model):
+    '''The convolutional capsule network from the 2018 paper
+
+    1.Hinton, G. E., Sabour, S. & Frosst, N. Matrix capsules with EM routing. in (2018).
+
+    For now designed for the MNIST dataset, will be generalized soon
+    '''
+    def __init__(self,):
+        super(MatrixCapsNet, self).__init__()
+
+        # Warning: testing out conv caps with dynamic routing for now.
+
+        # Create network layers
+        self.conv = layers.Conv2D(32, kernel_size=5, strides=(2, 2), padding='same', activation='relu')
+        self.primary = caps_layers.PrimaryCaps2D(32, kernel_size=1, capsule_dim=[4, 4], strides=1, padding='valid', activation='sigmoid')
+        self.convcaps1 = caps_layers.ConvCaps2D(32, kernel_size=3, strides=2, capsule_dim=[4,4], routing='EM')
+        self.convcaps2 = caps_layers.ConvCaps2D(32, kernel_size=3, strides=1, capsule_dim=[4,4], routing='EM')
+        self.classcaps = caps_layers.DenseCaps(10, capsule_dim=[4, 4], routing='EM', name='class_capsules')
+
+    def call(self, inputs):
+        filters = self.conv(inputs)
+        pose1, a1 = self.primary(filters)
+        pose2, a2 = self.convcaps1([pose1, a1])
+        pose3, a3 = self.convcaps2([pose2, a2])
+        pose_out, a_out = self.classcaps([pose3, a3])
+
+        return pose_out, a_out
+
+    @tf.function
+    def train_step(self, data):
+        print('train_step')
+        x, y = data
+
+        with tf.GradientTape() as tape:
+            # Forward propagation
+            filters = self.conv(x)
+            pose1, a1 = self.primary(filters)
+            pose2, a2 = self.convcaps1([pose1, a1])
+            pose3, a3 = self.convcaps2([pose2, a2])
+            pose_out, a_out = self.classcaps([pose3, a3])
+
+            # Calculate losss
+            loss = self.loss(y, a_out)
+
+        # Calculate gradients
+        training_vars = self.trainable_variables
+        gradients = tape.gradient(loss, training_vars)
+
+        # Optimize weights
+        self.optimizer.apply_gradients(zip(gradients, training_vars))
+
+        # Update metrics
+        self.compiled_metrics.update_state(y, a_out)
+
+        # Return loss and other metrics
+        output_dict = {m.name : m.result() for m in self.metrics}
+        output_dict['loss'] = loss
+        return output_dict
+
+    @tf.function
+    def test_step(self, data):
+        x, y = data
+
+        # Forward propagation
+        filters = self.conv(x)
+        pose1, a1 = self.primary(filters)
+        pose2, a2 = self.convcaps1([pose1, a1])
+        pose3, a3 = self.convcaps2([pose2, a2])
+        pose_out, a_out = self.classcaps([pose3, a3])
+
+        # Calculate losss
+        loss = self.loss(y, a_out)
+
+        # Update metrics
+        self.compiled_metrics.update_state(y, a_out)
+
+        # Return loss and other metrics
+        output_dict = {m.name : m.result() for m in self.metrics}
+        output_dict['loss'] = loss
+        return output_dict
+
+

@@ -136,6 +136,9 @@ def mask_output_capsules(labels, capsule_poses, weighted=False):
         ground truth labels to mask the output capsules by
     capsule_poses (tensor): A tensor containing the capsule poses
     weighted (boolean): If true converts labels to a binary mask
+
+    Returns:
+        pose_masked (tensor): Masked poses capsules
     '''
 
     if weighted:    
@@ -149,12 +152,65 @@ def mask_output_capsules(labels, capsule_poses, weighted=False):
             tf.constant(1, dtype=tf.float32), # 1 for max activation
             tf.constant(0, dtype=tf.float32) # 0 other capsules
         )
-        mask = tf.expand_dims(mask, axis=-1) # shape: [batch_size, num_caps, 1]
+        mask = tf.expand_dims(tf.expand_dims(mask, axis=-1), axis=-1) # shape: [batch_size, num_caps, 1, 1]
 
      # Apply mask to pose
     pose_shape = capsule_poses.shape # pose shape [batch_size, num_capsules] + caps_dim
-    pose_flat = tf.reshape(capsule_poses, [-1, pose_shape[1], pose_shape[-2] * pose_shape[-1]]) # flatten pose matrices into vectors
-    pose_masked = tf.multiply(pose_flat, mask) # shape [batch_size, num_capsules] + caps_dim
+    pose_masked = tf.multiply(capsule_poses, mask) # shape [batch_size, num_capsules] + caps_dim
 
     return pose_masked
+
+def add_coordinates(votes, pose_coords):
+    '''Used in the DenseCaps layer to add coordinates to the poses
+
+    Adds the coordinates of the capsule's spatial shape to the pose
+    pose matrices of the capsule votes for the next layer
+
+    Args:
+        votes (tensor): The capsule votes for the next layer
+        pose_coords (list): A list of 2d coordinates indicating which values
+            in the pose matrices to add the spatial coordinates to. The
+            2 dimensions represent rows and columns.
+
+    Returns:
+        offset_votes: The capsule votes pose matrices with the scaled
+            spatial coordinates added to the specified values.
+    '''
+    # votes shape [batch_size, num_capsules] + spatial_shape + [num_input_channels] + out_caps_dim
+    votes_shape = votes.shape
+    spatial_shape = votes_shape[2:-3]
+    caps_dim = votes_shape[-2:]
+
+    offset_votes = votes
+
+
+    assert len(pose_coords) < len(spatial_shape), 'There are more' \
+        'spatial dimensions specified in pose_coords than there are in the inputs'
+
+    # Add offsets. Number of spatial coords to use is number of 
+    for i, pose_coord in enumerate(pose_coords):
+        # Get size of spatial dimension
+        dim = spatial_shape[i]
+        # The center of the receptive field of each capsule is it's index + 0.5. Scale from 0 to 1
+        offsets = (tf.range(dim, dtype=tf.float32) + 0.5)/dim
+        # Create vector of zeros to fill rows
+        zeros_shape = [1] * (len(votes_shape) - 2)
+        zeros_shape[i + 2] = dim # eg. [1, 1, dim, 1, 1] for capsules with 2 spatial dims and i = 0
+        zeros = tf.constant(0.0, shape=zeros_shape, dtype=tf.float32)
+        # Create pose rows
+        offset_rows = tf.stack(
+            [zeros for _ in range(pose_coord[0])] + [offsets] + [zeros for _ in range(caps_dim[0] - 1 - pose_coord[0])],
+            axis=-1
+        ) # shape [1, dim, 1, 1, 1, 1]
+        # Create a vector of zeros to fill columns
+        zeros_shape.append(caps_dim[0])
+        zeros = tf.constant(0.0, shape=zeros_shape, dtype=tf.float32) # shape [1, 1, dim, 1, 1, caps_dim[0]] for i = 0 and 2 spatial dims
+        offset_matrices = tf.stack(
+            [zeros for _ in range(pose_coord[1])] + [offset_rows] + [zeros for _ in range(caps_dim[1] - 1 - pose_coord[1])],
+            axis=-1
+        )
+
+        offset_votes = offset_votes + offset_matrices # Add offsets for spatial dimension i to votes
+
+    return offset_votes
 
