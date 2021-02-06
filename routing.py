@@ -11,7 +11,7 @@ In This File:
 -Dynamic Routing
 
 TO-DO:
--EM Routing
+-Modify dynamic routing such that capsules do not need to be flattened
 -Explore Leaky Routing
 '''
 
@@ -91,21 +91,19 @@ def em_routing(votes, activations, beta_a, beta_u, iterations=3):
     # Input Votes shape
     # [batch_size, im_h, im_w, num_channels, num_votes_per_caps] + caps_dim
     # or [bacth_size, num_capsules, num_votes_per_caps] + caps_dim for densecaps
+    votes_shape = tf.shape(votes)
 
-    # Flatten votes into vectors
-    votes_shape = votes.shape
-    vec_len = votes_shape[-1] * votes_shape[-2]
-    votes_flat = tf.reshape(votes, shape=[-1] + list(votes_shape[1:-2]) + [vec_len])
-
+    
     # Add two extra dims to activations, one for num_output_caps and one for flattened caps_dim
-    a = tf.expand_dims(tf.expand_dims(activations, axis=-2), axis=-1) # a shape: [batch_size, im_h, im_w, 1, num_votes_per_cap, 1] or [batch_size, 1, num_votes_per_cap, 1]
+    a = tf.expand_dims(tf.expand_dims(tf.expand_dims(activations, axis=-2), axis=-1), axis=-1)
+    # a shape: [batch_size, im_h, im_w, 1, num_votes_per_cap, 1, 1] or [batch_size, 1, num_votes_per_cap, 1, 1]
 
-    # r shape: [num_channels/num_capsules, num_votes_per_caps, 1]
-    r = tf.constant(1.0/votes_shape[-4], shape=votes_shape[-4:-2] + [1], dtype=tf.float32) 
+    # r shape: [num_channels/num_capsules, num_votes_per_caps, 1, 1]. Starts as 1/num_output_channels
+    r = tf.constant(1.0/votes.shape[-4], shape=list(votes.shape[-4:-2]) + [1, 1], dtype=tf.float32)
 
-    # b shape to [1, 1, 1, num_channels, 1, 1] or [1, num_capsules, 1, 1] for dense layer
-    beta_a = tf.expand_dims(tf.expand_dims(beta_a, axis=-1), axis=-1)
-    beta_u = tf.expand_dims(tf.expand_dims(beta_u, axis=-1), axis=-1)
+    # b shape to [1, 1, 1, num_channels, 1, 1, 1] or [1, num_capsules, 1, 1, 1] for dense layer
+    beta_a = tf.expand_dims(tf.expand_dims(tf.expand_dims(beta_a, axis=-1), axis=-1), axis=-1)
+    beta_u = tf.expand_dims(tf.expand_dims(tf.expand_dims(beta_u, axis=-1), axis=-1), axis=-1)
 
     # Set min and max values for inverse temperature. Hyperparams taken from Jonathon Hui Implementation
     it_min = 1.0
@@ -113,23 +111,16 @@ def em_routing(votes, activations, beta_a, beta_u, iterations=3):
 
     for i in range(iterations):
         it = it_min + (i / max(1.0, it_max - 1.0)) * (it_max - it_min) # Set temperature value
-        caps_means, caps_vars, a_out = _m_step(a, r, votes_flat, beta_a, beta_u, it)
-        r = _e_step(caps_means, caps_vars, a_out, votes_flat)
-    
-    # Get rid of extra dimensions
-    capsule_poses = tf.squeeze(caps_means, axis=-2)
-    capsule_activations = tf.squeeze(a_out, axis=[-1, -2])
+        caps_means, caps_vars, a_out = _m_step(a, r, votes, beta_a, beta_u, it)
+        r = _e_step(caps_means, caps_vars, a_out, votes)
 
-    # reshape capsule vectors back into two dimensional capsules.
-    shape = list(votes_shape[1:-3]) # Get prefix dimensions
-    shape.insert(0, -1) # Insert -1 so that batch size remains the same
-    shape.append(votes_shape[-2]) # Append the first pose dimension
-    shape.append(votes_shape[-1]) # Append second pose dimension
-    capsule_poses = tf.reshape(capsule_poses, shape=shape) # Reshape vectors back into 2d
+    # Get rid of extra dimensions
+    capsule_poses = tf.squeeze(caps_means, axis=-3)
+    capsule_activations = tf.squeeze(a_out, axis=[-1, -2, -3])
 
     return capsule_poses, capsule_activations
     
-def _m_step(a, r, v, beta_a, beta_u, it, epsilon=1e-7):
+def _m_step(a, r, v, beta_a, beta_u, it, epsilon=1e-9):
     '''M Step for EM routing algorithm
 
     Args:
@@ -146,25 +137,34 @@ def _m_step(a, r, v, beta_a, beta_u, it, epsilon=1e-7):
         a_out: the estimated output capsule activations
     '''
     # Multiply r values by vote activations
-    r_a = r * a # [batch_size, im_h, im_w, num_channels, num_votes_per_cap, 1]
-    r_a_sum = tf.reduce_sum(r, axis=-2, keepdims=True) # Used multiple times
+    r_a = r * a # [batch_size, im_h, im_w, num_channels, num_votes_per_cap, 1, 1]
+    r_a_sum = tf.reduce_sum(r, axis=-3, keepdims=True) # Used multiple times
 
-    # Get mean over the axis of num_votes_per_caps [batch_size, im_h, im_w, num_channels, 1, caps_dim]
-    mean = tf.reduce_sum(r_a * v, axis=-2, keepdims=True) / r_a_sum
+    # Get mean over the axis of num_votes_per_caps [batch_size, im_h, im_w, num_channels, 1, caps_dim[0], caps_dim[1]]
+    mean = tf.reduce_sum(r_a * v, axis=-3, keepdims=True) / r_a_sum
 
     # Get variance over the axis of num_votes_per_caps, same shape as mean
-    var = tf.reduce_sum(r_a * tf.square(v - mean), axis=-2, keepdims=True) / r_a_sum
+    var = tf.reduce_sum(r_a * tf.square(v - mean), axis=-3, keepdims=True) / r_a_sum
 
     # Calculate cost
-    cost = beta_u + tf.math.log(tf.sqrt(var + epsilon)) * r_a_sum
+    # Normalize cost for numeric stability
+    cost = (beta_u + tf.math.log(tf.sqrt(var) + epsilon)) * r_a_sum
+    cost_sum = tf.reduce_sum(cost, axis=[-1, -2], keepdims=True) # sum of cost across each caps_dim
+    cost_mean = tf.reduce_mean(cost_sum, axis=-4, keepdims=True) # Take mean cost across each output channel
+    cost_std = tf.sqrt(
+        tf.reduce_sum(tf.square(cost_sum - cost_mean), axis=-4, keepdims=True) / cost_sum.shape[-3]
+        )
+    cost_norm = (cost_mean - cost_sum) / (cost_std + epsilon)
 
     # Calculate output activations
-    a_out = tf.sigmoid(it * (beta_a - tf.reduce_sum(cost, axis=-1, keepdims=True)))
-    # a_out shape [batch_size, im_h, im_w, num_channels, 1, 1]
+    a_out = tf.sigmoid(it * (beta_a + cost_norm))
+
+    # Currently outputting 1's on first iteration
+    # a_out shape [batch_size, im_h, im_w, num_channels, 1, 1, 1]
 
     return mean, var, a_out
 
-def _e_step(mean, var, a_out, v):
+def _e_step(mean, var, a_out, v, epsilon=1e-9):
     '''The E step for the EM routing algorithm
 
     Args:
@@ -176,14 +176,22 @@ def _e_step(mean, var, a_out, v):
     Returns:
         r: the routing matrix
     '''
-    
-    # Calculate probabilities
-    p_e = tf.exp(-1 * tf.reduce_sum(tf.square(v - mean) / (2 * var), axis=-1, keepdims=True))
-    p = p_e / tf.sqrt(tf.reduce_prod(2 * math.pi * var, axis=-1, keepdims=True))
-    # p shape [batch_size, im_h, im_w, num_channels, num_caps_per_vote, 1]
+    # Note the math here for implementing this algorithm uses the efficient
+    # implementation described in the paper but not with the equations in the
+    # algorithm. 
 
-    # Calculate new routing matrix
-    r = (a_out * p ) / tf.reduce_sum( a_out * p, axis=-3, keepdims=True)
-    # r shape [batch_size, im_h, im_w, num_channels, num_caps_per_vote, 1]
+    # sum of normalized votes for each capsule dimension
+    vote_norm = tf.reduce_sum(
+        tf.square(mean -  v) / 2 * var, axis=[-1, -2], keepdims=True
+    )
+    #vote_norm shape [batch_size, im_h, im_w, num_chan, 1, 1, 1]
+
+    log_var = tf.reduce_sum(tf.math.log(tf.sqrt(var) + epsilon), axis=[-1, -2], keepdims=True) # sum of log_var for each capsule dimension
+    log_prob = (-1 * vote_norm) - log_var - (tf.math.log(2*math.pi) / 2) # log probability density
+    log_activations = tf.math.log(a_out + epsilon) # shape [batch_size, im_h, im_w, channels, 1, 1, 1]
+    # log_prob and activation shape [batch_size] + spatial_shape + [channels/num_caps, 1, 1, 1]
+    r = tf.nn.softmax(
+        log_activations + log_prob, axis=-4
+    ) # take softmax along
 
     return r

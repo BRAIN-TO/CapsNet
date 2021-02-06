@@ -464,7 +464,7 @@ class ConvCaps2D(layers.Layer):
 
         # Get Image Shape Attributes
         ##############################
-        shape = tf.shape(votes)
+        shape = votes.shape
         im_height = shape[1] # Output height
         im_width = shape[2] # Output width
         num_votes_per_capsule = shape[4]*shape[5]*shape[6]

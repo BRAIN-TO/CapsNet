@@ -77,8 +77,8 @@ def spread_loss(y, y_pred, margin=0.2):
     mask_t = tf.equal(y, 1) # Locations of correct labels
     mask_i = tf.equal(y, 0) # Locations of incorrect labels
 
-    a_t = tf.reshape(tf.boolean_mask(y_pred, mask_t), shape=[shape[0], 1]) # activation of correct class
-    a_i = tf.reshape(tf.boolean_mask(y_pred, mask_i), shape=[shape[0], shape[1] - 1]) # Activations of incorrect classes
+    a_t = tf.reshape(tf.boolean_mask(y_pred, mask_t), shape=[-1, 1]) # activation of correct class
+    a_i = tf.reshape(tf.boolean_mask(y_pred, mask_i), shape=[-1, shape[1] - 1]) # Activations of incorrect classes
 
     loss = tf.reduce_sum(tf.square(tf.maximum(0.0, margin - (a_t - a_i))))
 

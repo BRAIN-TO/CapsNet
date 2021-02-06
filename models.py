@@ -155,7 +155,7 @@ class MatrixCapsNet(keras.Model):
         self.primary = caps_layers.PrimaryCaps2D(32, kernel_size=1, capsule_dim=[4, 4], strides=1, padding='valid', activation='sigmoid')
         self.convcaps1 = caps_layers.ConvCaps2D(32, kernel_size=3, strides=2, capsule_dim=[4,4], routing='EM')
         self.convcaps2 = caps_layers.ConvCaps2D(32, kernel_size=3, strides=1, capsule_dim=[4,4], routing='EM')
-        self.classcaps = caps_layers.DenseCaps(10, capsule_dim=[4, 4], routing='EM', name='class_capsules')
+        self.classcaps = caps_layers.DenseCaps(10, capsule_dim=[4, 4], routing='EM', name='class_capsules', add_coordinates=True, pose_coords=[[0, 3], [1, 3]])
 
     def call(self, inputs):
         filters = self.conv(inputs)
@@ -168,7 +168,6 @@ class MatrixCapsNet(keras.Model):
 
     @tf.function
     def train_step(self, data):
-        print('train_step')
         x, y = data
 
         with tf.GradientTape() as tape:
@@ -197,6 +196,7 @@ class MatrixCapsNet(keras.Model):
         output_dict['loss'] = loss
         return output_dict
 
+
     @tf.function
     def test_step(self, data):
         x, y = data
@@ -219,4 +219,17 @@ class MatrixCapsNet(keras.Model):
         output_dict['loss'] = loss
         return output_dict
 
+class HybridCapsNet(MatrixCapsNet):
+    '''
+    A Matrix CapsNet that uses Dynamic Routing instead of EM Routing
+    '''
+    def __init__(self,):
+        super(HybridCapsNet, self).__init__()
+
+        # Create network layers
+        self.conv = layers.Conv2D(32, kernel_size=5, strides=(2, 2), padding='same', activation='relu')
+        self.primary = caps_layers.PrimaryCaps2D(32, kernel_size=1, capsule_dim=[4, 4], strides=1, padding='valid', activation='squash')
+        self.convcaps1 = caps_layers.ConvCaps2D(32, kernel_size=3, strides=2, capsule_dim=[4,4], routing='dynamic', activation='squash')
+        self.convcaps2 = caps_layers.ConvCaps2D(32, kernel_size=3, strides=1, capsule_dim=[4,4], routing='dynamic', activation='squash')
+        self.classcaps = caps_layers.DenseCaps(10, capsule_dim=[4, 4], routing='dynamic', name='class_capsules', activation='norm', add_coordinates=True, pose_coords=[[0, 3], [1, 3]])
 

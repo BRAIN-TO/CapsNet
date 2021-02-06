@@ -182,33 +182,32 @@ def add_coordinates(votes, pose_coords):
     caps_dim = votes_shape[-2:]
 
     offset_votes = votes
-
-
-    assert len(pose_coords) < len(spatial_shape), 'There are more' \
+    assert len(pose_coords) <= len(spatial_shape), 'There are more' \
         'spatial dimensions specified in pose_coords than there are in the inputs'
 
     # Add offsets. Number of spatial coords to use is number of 
     for i, pose_coord in enumerate(pose_coords):
         # Get size of spatial dimension
         dim = spatial_shape[i]
+        # Create shape vector
+        shape = [1] * (len(votes_shape) - 2)
+        shape[i + 2] = dim # eg. [1, 1, dim, 1, 1] for capsules with 2 spatial dims and i = 0
         # The center of the receptive field of each capsule is it's index + 0.5. Scale from 0 to 1
-        offsets = (tf.range(dim, dtype=tf.float32) + 0.5)/dim
+        offsets = tf.reshape((tf.range(dim, dtype=tf.float32) + 0.5)/dim, shape=shape)
         # Create vector of zeros to fill rows
-        zeros_shape = [1] * (len(votes_shape) - 2)
-        zeros_shape[i + 2] = dim # eg. [1, 1, dim, 1, 1] for capsules with 2 spatial dims and i = 0
-        zeros = tf.constant(0.0, shape=zeros_shape, dtype=tf.float32)
+        zeros = tf.constant(0.0, shape=shape, dtype=tf.float32)
         # Create pose rows
         offset_rows = tf.stack(
             [zeros for _ in range(pose_coord[0])] + [offsets] + [zeros for _ in range(caps_dim[0] - 1 - pose_coord[0])],
             axis=-1
-        ) # shape [1, dim, 1, 1, 1, 1]
+        ) # shape [1, 1, dim, 1, 1, caps_dim[0]]
         # Create a vector of zeros to fill columns
-        zeros_shape.append(caps_dim[0])
-        zeros = tf.constant(0.0, shape=zeros_shape, dtype=tf.float32) # shape [1, 1, dim, 1, 1, caps_dim[0]] for i = 0 and 2 spatial dims
+        shape.append(caps_dim[0]) # shape [1, 1, dim, 1, 1, caps_dim[0]]
+        zeros = tf.constant(0.0, shape=shape, dtype=tf.float32) # shape [1, 1, dim, 1, 1, caps_dim[0]] for i = 0 and 2 spatial dims
         offset_matrices = tf.stack(
             [zeros for _ in range(pose_coord[1])] + [offset_rows] + [zeros for _ in range(caps_dim[1] - 1 - pose_coord[1])],
             axis=-1
-        )
+        ) # shape [1, 1, dim, 1, 1, caps_dim[0], caps_dim[1]]
 
         offset_votes = offset_votes + offset_matrices # Add offsets for spatial dimension i to votes
 
