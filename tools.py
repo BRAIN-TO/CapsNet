@@ -7,7 +7,10 @@ Contains helper functions
 In this script:
 -squash
 -arg_2_list
--get_weight_matrixg
+-get_weight_matrix
+-safe_norm
+-mask_output_capsules
+-add_coordinates
 '''
 
 def squash(inputs, axis=-1):
@@ -164,13 +167,13 @@ def add_coordinates(votes, pose_coords):
     '''Used in the DenseCaps layer to add coordinates to the poses
 
     Adds the coordinates of the capsule's spatial shape to the pose
-    pose matrices of the capsule votes for the next layer
+    matrices of the capsule votes for the next layer
 
     Args:
         votes (tensor): The capsule votes for the next layer
         pose_coords (list): A list of 2d coordinates indicating which values
             in the pose matrices to add the spatial coordinates to. The
-            2 dimensions represent rows and columns.
+            2 dimensions represent rows and columns respectively.
 
     Returns:
         offset_votes: The capsule votes pose matrices with the scaled

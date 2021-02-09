@@ -1,4 +1,6 @@
+# PubliC API's
 import tensorflow as tf
+# Custom Imports
 import tools
 
 '''Losses
@@ -6,7 +8,9 @@ import tools
 Contains the various loss functions used for capsule networks
 
 In this file:
--
+-margin_recon_loss
+-recon_loss
+-spread_loss
 '''
 
 def margin_recon_loss(capsule_activations, reconstructed_images, input_images, labels, m_plus=0.9, m_minus=0.1, lambda_val=0.5, alpha=0.0005):
@@ -40,7 +44,8 @@ def margin_recon_loss(capsule_activations, reconstructed_images, input_images, l
 
 
     preds = capsule_activations
-
+    
+    # Calculate margin loss
     left_margin = tf.square(tf.maximum(0.0, m_plus - preds))
     right_margin = tf.square(tf.maximum(0.0, preds - m_minus))
 
@@ -65,6 +70,26 @@ def margin_recon_loss(capsule_activations, reconstructed_images, input_images, l
     # loss should be a single value
     return loss
 
+def mse_recon_loss(input_images, reconstructed_images):
+    '''A mean squared error loss function for images
+
+    Args:
+        input_images (tensor): The ground truth images
+        reconstructed_images (tensor): The images reconstructed by the network
+    '''
+    # Check if recon and input images have been flattened already
+    if len(reconstructed_images.shape) == 3:
+        shape = tf.shape(reconstructed_images)
+        reconstructed_images = tf.reshape(reconstructed_images, [-1, shape[1]*shape[2]])
+
+    if len(input_images.shape) == 3:
+        shape = tf.shape(input_images)
+        input_images = tf.reshape(input_images, [-1, shape[1]*shape[2]])
+
+    recon_loss = tf.reduce_mean(tf.square(input_images - reconstructed_images))
+
+    return recon_loss
+
 def spread_loss(y, y_pred, margin=0.2):
     '''The spread loss function from the 2018 paper 'Matrix Capsules with EM Routing'
 
@@ -77,9 +102,11 @@ def spread_loss(y, y_pred, margin=0.2):
     mask_t = tf.equal(y, 1) # Locations of correct labels
     mask_i = tf.equal(y, 0) # Locations of incorrect labels
 
+    # Seperate activations predicted class from other classes
     a_t = tf.reshape(tf.boolean_mask(y_pred, mask_t), shape=[-1, 1]) # activation of correct class
     a_i = tf.reshape(tf.boolean_mask(y_pred, mask_i), shape=[-1, shape[1] - 1]) # Activations of incorrect classes
 
+    # Calculate spread loss
     loss = tf.reduce_sum(tf.square(tf.maximum(0.0, margin - (a_t - a_i))))
 
     return loss

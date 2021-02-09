@@ -19,9 +19,6 @@ In this file:
 -ConvCaps2D
 
 TO-DO:
--Add different activation methods for convcaps and densecaps
--Change dense layer to work with having previous layer also being dense by
-adding a flatten layer
 -Add discriminative learning for log priors in dynamic routing algorithm
 -Support the use of a bias in conv caps
 -Potentially move the get_votes and get_pose_blocks methods into tools
@@ -477,6 +474,7 @@ class ConvCaps2D(layers.Layer):
         if self.routing == 'dynamic':
             # capsule_poses shape: [batch_size, im_height, im_width, num_out_channels] + capsule_dim
             capsule_poses = routing.dynamic_routing(votes)
+            tf.print(capsule_poses)
 
              # Calculate new capsule activations
             if self.activation == 'sigmoid':
@@ -522,55 +520,7 @@ class ConvCaps2D(layers.Layer):
             'kernel_initializer': self.kernel_initializer,
         }
         base_config = super(ConvCaps2D, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
-
-class FlattenCaps(layers.Layer):
-    '''DEPRECATED: A Layer that flattens layers into 1 dimension
-
-    Flattens an N-dimensional capsule layer into 1 dimension. Usually so
-    that it can be followed by a Dense Caps Layer. Does not apply weights
-    or change the batch size and assumes channels_last format
-
-    Args:
-        add_coordinates (bool): If true will use add the scaled indices 
-            of the spatial shape of the inputs to the values within the 
-            capsule poses indicated by the pose_coords argument. The spatial
-            dimensions are assumed to be the dimensions between the first 
-            (batch_size) dimension and the third last (num_channels)
-            dimension. Note it is not recommended to use this feature 
-            when there are more than 3 spatial dimensions
-        pose_coords (list): A list of 2d coordinates indicating which value
-            within the capsule pose matrices to add the coordinates
-            from the previous layers spatial shape. The order of coordinates
-            corresponds to the order of spatial dimensions in the input layer
-        **kwargs: Arbitrary keyword arguments for keras.layers.Layer() 
-    '''
-    def __init__(self, add_coordinates=False, pose_coords=None, **kwargs):
-        super(FlattenCaps, self).__init__(**kwargs)
-
-    def call(self, inputs):
-        '''Flattens the inputs
-
-        Args:
-            inputs (list): A list containing the input capsule poses and
-                capsule activations
-        '''
-        poses = inputs[0] # shape: [batch_size] + spatial_shape + [num_channels, caps_dim[0], caps_dim[1]]
-        activations = inputs[1] # shape: [batch_size] + spatial_shape
-        # where spatial shape is typically [im_h, im_w, num_channels]
-
-        # Get input shapes
-        pose_shape = poses.shape
-        spatial_shape = pose_shape[1:-3] # Omit capsule dim and batch size to get spatial_shape
-        num_input_channels = pose_shape[-3]
-        caps_dim = pose_shape[-2:] # Last two dimensions are capsule pose dimensions
-        num_capsules = np.prod(spatial_shape)*num_input_channels
-
-        # Flatten inputs
-        output_poses = tf.reshape(poses, shape=[-1] + list(num_capsules) + caps_dim)
-        output_activations = tf.reshape(activations, shape=[-1] + list(num_capsules) + caps_dim)
-
-        return output_poses, output_activations   
+        return dict(list(base_config.items()) + list(config.items())) 
 
 class DenseCaps(layers.Layer):
     '''A Dense Layer For Capsules
@@ -774,3 +724,50 @@ class DenseCaps(layers.Layer):
         base_config = super(DenseCaps, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
+class FlattenCaps(layers.Layer):
+    '''DEPRECATED: A Layer that flattens layers into 1 dimension
+
+    Flattens an N-dimensional capsule layer into 1 dimension. Usually so
+    that it can be followed by a Dense Caps Layer. Does not apply weights
+    or change the batch size and assumes channels_last format
+
+    Args:
+        add_coordinates (bool): If true will use add the scaled indices 
+            of the spatial shape of the inputs to the values within the 
+            capsule poses indicated by the pose_coords argument. The spatial
+            dimensions are assumed to be the dimensions between the first 
+            (batch_size) dimension and the third last (num_channels)
+            dimension. Note it is not recommended to use this feature 
+            when there are more than 3 spatial dimensions
+        pose_coords (list): A list of 2d coordinates indicating which value
+            within the capsule pose matrices to add the coordinates
+            from the previous layers spatial shape. The order of coordinates
+            corresponds to the order of spatial dimensions in the input layer
+        **kwargs: Arbitrary keyword arguments for keras.layers.Layer() 
+    '''
+    def __init__(self, add_coordinates=False, pose_coords=None, **kwargs):
+        super(FlattenCaps, self).__init__(**kwargs)
+
+    def call(self, inputs):
+        '''Flattens the inputs
+
+        Args:
+            inputs (list): A list containing the input capsule poses and
+                capsule activations
+        '''
+        poses = inputs[0] # shape: [batch_size] + spatial_shape + [num_channels, caps_dim[0], caps_dim[1]]
+        activations = inputs[1] # shape: [batch_size] + spatial_shape
+        # where spatial shape is typically [im_h, im_w, num_channels]
+
+        # Get input shapes
+        pose_shape = poses.shape
+        spatial_shape = pose_shape[1:-3] # Omit capsule dim and batch size to get spatial_shape
+        num_input_channels = pose_shape[-3]
+        caps_dim = pose_shape[-2:] # Last two dimensions are capsule pose dimensions
+        num_capsules = np.prod(spatial_shape)*num_input_channels
+
+        # Flatten inputs
+        output_poses = tf.reshape(poses, shape=[-1] + list(num_capsules) + caps_dim)
+        output_activations = tf.reshape(activations, shape=[-1] + list(num_capsules) + caps_dim)
+
+        return output_poses, output_activations  

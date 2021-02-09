@@ -14,6 +14,9 @@ Contains various model archetectures using capsule layers
 
 In this file:
 -CapsNet
+-MatrixCapsNet
+-HybridCapsNet (Not Functional)
+-CapsRecons
 
 TO-DO:
 '''
@@ -226,6 +229,15 @@ class HybridCapsNet(MatrixCapsNet):
     def __init__(self,):
         super(HybridCapsNet, self).__init__()
 
+        # Loss at each step does not change
+            # Probably due to diff between a_t and a_i being near zero
+        # y_pred values all 0.9999+ (activation for each capsule near 1)
+        # accuracy does vary
+        # input_poses to convcaps potentially approaching zero, but otherwise nothing weird
+        # nothing noticeably weird with kernel weights of convcaps
+        # capsule_pose output after routing definitely approaches zero
+
+
         # Create network layers
         self.conv = layers.Conv2D(32, kernel_size=5, strides=(2, 2), padding='same', activation='relu')
         self.primary = caps_layers.PrimaryCaps2D(32, kernel_size=1, capsule_dim=[4, 4], strides=1, padding='valid', activation='squash')
@@ -233,3 +245,79 @@ class HybridCapsNet(MatrixCapsNet):
         self.convcaps2 = caps_layers.ConvCaps2D(32, kernel_size=3, strides=1, capsule_dim=[4,4], routing='dynamic', activation='squash')
         self.classcaps = caps_layers.DenseCaps(10, capsule_dim=[4, 4], routing='dynamic', name='class_capsules', activation='norm', add_coordinates=True, pose_coords=[[0, 3], [1, 3]])
 
+class CapsRecon(CapsNet):
+    '''Same model as CapsNet except only using reconstruction loss
+    '''
+
+    # Got similar loss on test set after 2 epochs as CapsNet did after 
+    # 50 epochs (0.0219 vs 0.0191)
+    # Compared reconstructed images to og images and they looked good in general
+    # Adjusted dimensions and features appear to have been learned
+    def __init__(self):
+        super(CapsRecon, self).__init__()
+
+    @tf.function
+    def train_step(self, data):
+        x, y = data # x are input images, y are ohe labels
+
+        # Forward propagation
+        ##############################
+        with tf.GradientTape() as tape:
+            # Propagate through encoder
+            conv_out = self.conv(x)
+            pose1, a1 = self.primary(conv_out)
+            pose2, a2 = self.dense([pose1, a1])
+
+            pose_masked = tools.mask_output_capsules(y, pose2, weighted=False)
+
+            # Reconstruct image
+            pose_shape = pose_masked.shape
+            decoder_input = tf.reshape(pose_masked, [-1, pose_shape[1] * pose_shape[2] * pose_shape[3]])
+            recon_images = self.decoder(decoder_input)
+
+            # Calculate loss
+            x_flat = tf.reshape(x, [-1, tf.math.reduce_prod(tf.shape(x)[1:])]) # flatten input images
+            loss = self.loss(x_flat, recon_images)
+        
+        # Calculate gradients
+        training_vars = self.trainable_variables
+        gradients = tape.gradient(loss, training_vars)
+
+        # Optimize weights
+        self.optimizer.apply_gradients(zip(gradients, training_vars))
+
+        # Update metrics
+        self.compiled_metrics.update_state(y, a2)
+
+        # Return loss and other metrics
+        output_dict = {m.name : m.result() for m in self.metrics}
+        output_dict['loss'] = loss
+        return output_dict
+
+    @tf.function
+    def test_step(self, data):
+        x, y = data # x are input images, y are ohe labels
+
+        # Propagate through encoder
+        conv_out = self.conv(x)
+        pose1, a1 = self.primary(conv_out)
+        pose2, a2 = self.dense([pose1, a1])
+
+        pose_masked = tools.mask_output_capsules(a2, pose2, weighted=False)
+
+        # Update metrics
+        self.compiled_metrics.update_state(y, a2)
+
+        # Reconstruct image
+        pose_shape = pose_masked.shape # shape [batch_size, num_caps, caps_dim[0], caps_dim[1]]
+        decoder_input = tf.reshape(pose_masked, [-1, pose_shape[1] * pose_shape[2] * pose_shape[3]])
+        recon_images = self.decoder(decoder_input)
+
+        # Calculate loss
+        x_flat = tf.reshape(x, [-1, tf.math.reduce_prod(tf.shape(x)[1:])]) # flatten input images
+        loss = self.loss(x_flat, recon_images)
+
+        # Return loss and other metrics
+        output_dict = {m.name : m.result() for m in self.metrics}
+        output_dict['loss'] = loss
+        return output_dict

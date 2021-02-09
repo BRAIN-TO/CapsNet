@@ -9,9 +9,10 @@ layers
 
 In This File:
 -Dynamic Routing
+-EM Routing
 
 TO-DO:
--Modify dynamic routing such that capsules do not need to be flattened
+-Maybe modify dynamic routing such that capsules do not need to be flattened
 -Explore Leaky Routing
 '''
 
@@ -109,10 +110,11 @@ def em_routing(votes, activations, beta_a, beta_u, iterations=3):
     it_min = 1.0
     it_max = min(iterations, 3.0)
 
+    # Iterate through routing algorithm
     for i in range(iterations):
         it = it_min + (i / max(1.0, it_max - 1.0)) * (it_max - it_min) # Set temperature value
-        caps_means, caps_vars, a_out = _m_step(a, r, votes, beta_a, beta_u, it)
-        r = _e_step(caps_means, caps_vars, a_out, votes)
+        caps_means, caps_vars, a_out = _m_step(a, r, votes, beta_a, beta_u, it) # M-Step
+        r = _e_step(caps_means, caps_vars, a_out, votes) # E-Step
 
     # Get rid of extra dimensions
     capsule_poses = tf.squeeze(caps_means, axis=-3)
@@ -123,9 +125,12 @@ def em_routing(votes, activations, beta_a, beta_u, iterations=3):
 def _m_step(a, r, v, beta_a, beta_u, it, epsilon=1e-9):
     '''M Step for EM routing algorithm
 
+    Calculates the output capsule predictions given the input capsules and
+    the soft routing assignments
+
     Args:
         a: The activations for the votes
-        r: the routing matrix
+        r: the routing assignment matrix
         v: the flattened capsule votes
         beta_a: The cost of activating a capsule
         beta_v: The cost of not activating a capsule
@@ -167,6 +172,9 @@ def _m_step(a, r, v, beta_a, beta_u, it, epsilon=1e-9):
 def _e_step(mean, var, a_out, v, epsilon=1e-9):
     '''The E step for the EM routing algorithm
 
+    Adjust the routing assignments of input capsules to output capsules
+    given the current output capsule predictions
+
     Args:
         mean: the capsule means from the m step
         var: the capsule variances from the m step
@@ -174,7 +182,7 @@ def _e_step(mean, var, a_out, v, epsilon=1e-9):
         v: the flattened capsule votes
 
     Returns:
-        r: the routing matrix
+        r: the routing assignment matrix
     '''
     # Note the math here for implementing this algorithm uses the efficient
     # implementation described in the paper but not with the equations in the
@@ -190,8 +198,9 @@ def _e_step(mean, var, a_out, v, epsilon=1e-9):
     log_prob = (-1 * vote_norm) - log_var - (tf.math.log(2*math.pi) / 2) # log probability density
     log_activations = tf.math.log(a_out + epsilon) # shape [batch_size, im_h, im_w, channels, 1, 1, 1]
     # log_prob and activation shape [batch_size] + spatial_shape + [channels/num_caps, 1, 1, 1]
+
     r = tf.nn.softmax(
         log_activations + log_prob, axis=-4
-    ) # take softmax along
+    ) # take softmax along num_caps/channels
 
     return r

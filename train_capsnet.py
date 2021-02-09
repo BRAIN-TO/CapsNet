@@ -1,12 +1,18 @@
-#imports
+#Public API's
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.datasets import mnist
+# Custom Imports
 from models import CapsNet
 import losses
 import json
+
+'''Experimented with using callbacks to save a model at various checkpoints
+throughout training (eg. every 10 epochs).
+    -However for some reason callback only saves weights and not entire model
+'''
 
 (x_train, y_train), (x_test, y_test) = mnist.load_data()
 x_train = x_train.reshape(-1, 28, 28, 1).astype('float32')/255.0
