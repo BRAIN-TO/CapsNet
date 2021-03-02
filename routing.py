@@ -90,7 +90,7 @@ def em_routing(votes, activations, beta_a, beta_u, iterations=3):
         iterations (int): The number of iterations to run the routing algorithm
     '''
     # Input Votes shape
-    # [batch_size, im_h, im_w, num_channels, num_votes_per_caps] + caps_dim
+    # [batch_size, im_h, im_w, num_channels, num_votes_per_caps] + caps_dim # This is the memory constraint
     # or [bacth_size, num_capsules, num_votes_per_caps] + caps_dim for densecaps
     votes_shape = tf.shape(votes)
 

@@ -2,6 +2,7 @@
 import tensorflow as tf
 # Custom Imports
 import tools
+from tensorflow.keras.losses import cosine_similarity, mean_squared_error
 
 '''Losses
 
@@ -9,8 +10,8 @@ Contains the various loss functions used for capsule networks
 
 In this file:
 -margin_recon_loss
--recon_loss
 -spread_loss
+-mse_cosine_loss
 '''
 
 def margin_recon_loss(capsule_activations, reconstructed_images, input_images, labels, m_plus=0.9, m_minus=0.1, lambda_val=0.5, alpha=0.0005):
@@ -70,26 +71,6 @@ def margin_recon_loss(capsule_activations, reconstructed_images, input_images, l
     # loss should be a single value
     return loss
 
-def mse_recon_loss(input_images, reconstructed_images):
-    '''A mean squared error loss function for images
-
-    Args:
-        input_images (tensor): The ground truth images
-        reconstructed_images (tensor): The images reconstructed by the network
-    '''
-    # Check if recon and input images have been flattened already
-    if len(reconstructed_images.shape) == 3:
-        shape = tf.shape(reconstructed_images)
-        reconstructed_images = tf.reshape(reconstructed_images, [-1, shape[1]*shape[2]])
-
-    if len(input_images.shape) == 3:
-        shape = tf.shape(input_images)
-        input_images = tf.reshape(input_images, [-1, shape[1]*shape[2]])
-
-    recon_loss = tf.reduce_mean(tf.square(input_images - reconstructed_images))
-
-    return recon_loss
-
 def spread_loss(y, y_pred, margin=0.2):
     '''The spread loss function from the 2018 paper 'Matrix Capsules with EM Routing'
 
@@ -111,6 +92,10 @@ def spread_loss(y, y_pred, margin=0.2):
 
     return loss
 
+def mse_cosine_loss(y, y_pred, mse_factor=1, cosine_factor=0.1):
+    mse = mean_squared_error(y, y_pred)
+    cos = cosine_similarity(y, y_pred)
+    return mse_factor*mse + cosine_factor*cos
 
 
     

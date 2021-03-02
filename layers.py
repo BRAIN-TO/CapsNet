@@ -20,7 +20,6 @@ In this file:
 
 TO-DO:
 -Add discriminative learning for log priors in dynamic routing algorithm
--Support the use of a bias in conv caps
 -Potentially move the get_votes and get_pose_blocks methods into tools
     in order to make this file more readable
 -Potentially switch return order of pose and activations

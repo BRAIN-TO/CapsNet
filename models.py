@@ -224,6 +224,8 @@ class MatrixCapsNet(keras.Model):
 
 class HybridCapsNet(MatrixCapsNet):
     '''
+    WARNING: Not Currently Functional
+    
     A Matrix CapsNet that uses Dynamic Routing instead of EM Routing
     '''
     def __init__(self,):

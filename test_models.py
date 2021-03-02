@@ -5,8 +5,8 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.datasets import mnist
 # Custom Imports
-from models import CapsNet, MatrixCapsNet, HybridCapsNet, CapsRecon
-import losses
+from pycaps.models import CapsNet, MatrixCapsNet, HybridCapsNet, CapsRecon
+from pycaps simport losses
 import json
 
 save = True # Whether or not to save the model
