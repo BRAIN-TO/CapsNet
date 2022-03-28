@@ -1,0 +1,15 @@
+batch_size: 8
+epochs: 100
+loss: mse_cosine
+lr_schedule: 'e<10: 0.001, e>10: 0.0001, e>20: 0.00001'
+max_shift: 5
+optimizer:
+  amsgrad: false
+  beta_1: 0.9
+  beta_2: 0.999
+  decay: 0.0
+  epsilon: 1.0e-07
+  learning_rate: 0.001
+  name: Adam
+roi: ROI_VC
+val_batch_size: 20

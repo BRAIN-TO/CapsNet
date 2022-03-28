@@ -17,7 +17,7 @@ import losses
 '''
 
 # The name of the model to load
-model_name = 'CapsRecon_mnist'
+model_name = 'CapsNet_mnist'
 
 print('Importing Data...')
 (x_train, y_train), (x_test, y_test) = mnist.load_data()
@@ -25,7 +25,7 @@ x_train = x_train.reshape(-1, 28, 28, 1).astype('float32')/255.0
 x_test = x_test.reshape(-1, 28, 28, 1).astype('float32')/255.0
 
 print('Loading Model...')
-model = keras.models.load_model('models/' + model_name + '/saved_model', custom_objects={'mse_recon_loss' : losses.mse_recon_loss})
+model = keras.models.load_model('models/' + model_name + '/saved_model', custom_objects={'margin_recon_loss' : losses.margin_recon_loss})
 
 print('Getting Reconstructions')
 sample = x_train[100, :, :, :]
@@ -41,7 +41,7 @@ sample = tf.reshape(sample, [28, 28, 1])
 tf.keras.preprocessing.image.save_img('images/im100-sample.png', sample, data_format='channels_last')
 
 # Modify capsules to see how dimensions affect reconstruction
-dim = [5, 0] # Dimensions to vary
+dim = [1, 0] # Dimensions to vary
 p = tf.tile(p, [11, 1, 1, 1]).numpy() # shape: [batch_size, num_capsules, caps_dim[0], caps_dim[1]]
 a = tf.tile(a, [11, 1])
 
@@ -52,7 +52,12 @@ for i, val in enumerate(vals):
     # Add for every capsule since all but one capsule will be masked/zeroed anyways
     p[i, :, dim[0], dim[1]] = p[i, :, dim[0], dim[1]] + val 
 
-images = model.reconstruct_image(a, p)
+im_flat = model.reconstruct_image(a, p)
+print(tf.shape(im_flat))
+images = tf.reshape(im_flat, [-1, 28, 28, 1])
 print(tf.shape(images))
-collage = tf.reshape(images, [11*28, 28, 1])
-tf.keras.preprocessing.image.save_img('images/collage.png', collage, data_format='channels_last')
+#collage = tf.reshape(images, [28, 11*28, 1])
+imlist = [images[i, :, :] for i in range(tf.shape(images)[0])]
+collage = tf.concat(imlist, axis=1)
+print(tf.shape(collage))
+tf.keras.preprocessing.image.save_img('images/collage_dim1.png', collage, data_format='channels_last')

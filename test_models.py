@@ -1,3 +1,4 @@
+print('Importing Packages...')
 #Public API's
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
@@ -5,12 +6,13 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.datasets import mnist
 # Custom Imports
-from pycaps.models import CapsNet, MatrixCapsNet, HybridCapsNet, CapsRecon
-from pycaps simport losses
+from models import CapsNet, MatrixCapsNet, HybridCapsNet, CapsRecon
+import losses
 import json
 
-save = True # Whether or not to save the model
-model_name = 'CapsRecon_mnist' # Model name
+print('Loading Data...')
+save = False # Whether or not to save the model
+model_name = 'LowMem_mnist' # Model name
 
 # Load MNIST Data
 (x_train, y_train), (x_test, y_test) = mnist.load_data()
@@ -21,6 +23,7 @@ x_test = x_test.reshape(-1, 28, 28, 1).astype('float32')/255.0
 y_train = tf.one_hot(y_train, depth=10)
 y_test = tf.one_hot(y_test, depth=10)
 
+print('Building Model...')
 # Accuracy metric for classification models
 acc_metric = keras.metrics.SparseCategoricalAccuracy(name='accuracy')
 
@@ -29,11 +32,11 @@ strategy = tf.distribute.MirroredStrategy()
 print("Number of GPU's in use: {}".format(strategy.num_replicas_in_sync))
 
 with strategy.scope():
-    model = CapsRecon()
+    model = MatrixCapsNet()
     model.compile(
         optimizer=keras.optimizers.Adam(),
-        loss=losses.mse_recon_loss, # reminder to not include parentheses here
-        #metrics=['accuracy']
+        loss=losses.spread_loss, # reminder to not include parentheses here
+        metrics=['accuracy']
     )
 
     model.build(x_train.shape) # build model so that we can print summary
@@ -42,8 +45,8 @@ with strategy.scope():
 print(model.summary())
 
 # Train and Test Model
-training = model.fit(x=x_train, y=y_train, batch_size=25, epochs=2, verbose=1)
-testing = model.evaluate(x_test, y_test, batch_size=25, return_dict=True)
+training = model.fit(x=x_train, y=y_train, validation_data=(x_test, y_test), batch_size=20, epochs=10, verbose=1)
+testing = model.evaluate(x_test, y_test, batch_size=20, return_dict=True)
 
 # Model Saving
 if save:

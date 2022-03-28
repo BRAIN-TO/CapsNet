@@ -1,0 +1,3 @@
+batch_size: 75
+epochs: 1
+val_batch_size: 50

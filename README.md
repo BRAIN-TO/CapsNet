@@ -9,7 +9,7 @@ state
 - Layers
     - Contains keras layers for building capsule networks
 - Models
-    - Contains capsule networks from the original papers as well as some experimental layers
+    - Contains capsule networks from the original papers as well as some experimental models
 - Routing
     - Contains various routing algorithms for between capsule layers
 - Lossess

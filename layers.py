@@ -1,8 +1,11 @@
 # Public API's
 import tensorflow as tf
 from tensorflow import keras
+from tensorflow._api.v2 import dtypes
 from tensorflow.keras import layers
 import numpy as np
+from tensorflow.python.keras.utils import conv_utils
+from tensorflow.python.ops.gen_array_ops import pad
 # Custom Imports
 import tools
 import routing
@@ -64,9 +67,11 @@ class PrimaryCaps2D(layers.Layer):
         kernel_initializer (str): A string identifier for one of the 
             keras initializers. See the following documentation.
             https://www.tensorflow.org/api_docs/python/tf/keras/initializers
+        kernel_regularizer: A tensorflow regularizer instance
+        bias_regularizer: A tensorflow regularizer instance
         **kwargs: Arbitrary keyword arguments for keras.layers.Layer()  
     '''
-    def __init__(self, num_channels, kernel_size, capsule_dim, strides=1, padding='valid', activation='sigmoid', kernel_initializer='glorot_uniform', **kwargs):
+    def __init__(self, num_channels, kernel_size, capsule_dim, strides=1, padding='valid', activation='sigmoid', kernel_initializer='glorot_uniform', kernel_regularizer=None, bias_regularizer=None, **kwargs):
         super(PrimaryCaps2D, self).__init__(**kwargs) # Call parent init
 
         # Check input arguments
@@ -89,7 +94,9 @@ class PrimaryCaps2D(layers.Layer):
         self.padding = padding
         self.activation = activation
         self.kernel_initializer = keras.initializers.get(kernel_initializer)
-        self.built = False   
+        self.kernel_regularizer = kernel_regularizer
+        self.bias_regularizer = bias_regularizer
+        self.built = False 
     
     def build(self, input_shape):
         '''Builds the primary capsule layer.
@@ -113,6 +120,7 @@ class PrimaryCaps2D(layers.Layer):
             name='kernel',
             shape=[self.kernel_dim[0], self.kernel_dim[1], input_shape[-1], self.num_channels*np.prod(self.capsule_dim)],
             initializer=self.kernel_initializer,
+            regularizer=self.kernel_regularizer,
             trainable=True
         )
         # self.kernel shape: [k, k, input_filters, num_channels*np.prod(capsule_dim)]
@@ -123,6 +131,7 @@ class PrimaryCaps2D(layers.Layer):
         self.b = self.add_weight(
             name='b',
             shape=[self.num_channels*np.prod(self.capsule_dim),],
+            regularizer=self.bias_regularizer,
             trainable=True
         )
 
@@ -165,7 +174,8 @@ class PrimaryCaps2D(layers.Layer):
         poses_stacked = tf.add(poses_stacked, self.b)
 
         # Reshape the poses into capsule form
-        pose_shape = poses_stacked.shape # Has shape [batch_size, im_height, im_width, filters]
+        #pose_shape = poses_stacked.shape # Has shape [batch_size, im_height, im_width, filters]
+        pose_shape = tf.shape(poses_stacked)
 
         # reshape into: [batch_size, im_height, im_width, num_channels, np.prod(self.capsule_dim)]
         capsule_poses = tf.reshape(poses_stacked, [-1, pose_shape[1], pose_shape[2], self.num_channels] + self.capsule_dim)
@@ -187,16 +197,12 @@ class PrimaryCaps2D(layers.Layer):
             capsule_activations = tf.sigmoid(conv)
 
         else: # Use squash or norm method
-            # Flatten capsule poses into vectors
-            shape = capsule_poses.shape
-            vectors = tf.reshape(capsule_poses, shape=[-1, shape[1], shape[2], shape[3], shape[4]*shape[5]])
-
             if self.activation == 'squash':
                 # Use squash function on capsule poses
-                vectors = tools.squash(vectors)
+                squashed = tools.squash(capsule_poses, axis=[-2, -1])
 
             # Calculate length of each capsule vector
-            capsule_activations = tf.norm(vectors, axis=-1) 
+            capsule_activations = tf.norm(squashed, axis=[-2, -1]) 
 
         # capsule_activations shape:
         # [batch_size, im_height, im_width, num_channels]
@@ -226,6 +232,16 @@ class PrimaryCaps2D(layers.Layer):
         base_config = super(PrimaryCaps2D, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
+    # def compute_output_shape(self, input_shape):
+    #     # input shape is [batch_size, im_height, im_width, filters]
+    #     # capsule_activations shape: [batch_size, im_height_new, im_width_new, num_channels]
+    #     # capsules pose shape: [batch_size, im_height_new, im_width_new, num_channels, caps_dim[0], caps_dim[1]]
+    #     h_new = conv_utils.conv_output_length(input_shape[1], self.kernel_dim[0], padding=self.padding, stride=self.strides[0])
+    #     w_new = conv_utils.conv_output_length(input_shape[2], self.kernel_dim[1], padding=self.padding, stride=self.strides[1])
+    #     a_shape = (input_shape[0], h_new, w_new, self.num_channels)
+    #     p_shape = (input_shape[0], h_new, w_new, self.num_channels, self.capsule_dim[0], self.capsule_dim[1])
+    #     return [p_shape, a_shape] # return shapes for both outputs
+
 class ConvCaps2D(layers.Layer):
     '''A Two Dimensional Convolutional Capsule Layer
 
@@ -234,7 +250,7 @@ class ConvCaps2D(layers.Layer):
     It then uses routing to generate its own capsules from these votes. 
     The inputs to this layer must be in capsule format.
     '''
-    def __init__(self, num_channels, kernel_size, capsule_dim, routing='EM', strides=1, padding='same', activation='sigmoid', kernel_initializer='he_normal', **kwargs):
+    def __init__(self, num_channels, kernel_size, capsule_dim, routing='EM', routing_iterations=3, strides=1, padding='same', activation='sigmoid', kernel_initializer='he_normal', kernel_regularizer=None, **kwargs):
         '''A Two Dimensional Convolutional Capsule Layer
 
         A convolutional capsule layer that uses routing to generate higher
@@ -257,6 +273,8 @@ class ConvCaps2D(layers.Layer):
             routing (str): The kind of routing to use in this layer. Either
                 'dynamic' or 'EM'. If EM, the capsule activations are calculated
                 via the routing algorithm and the activation argument is ignored
+            routing_iterations (int): The number of iterations to run the routing
+                algorithm during the forward pass
             strides (int or list): A list of two integers
                 that specify the stride of convolution along the height
                 and width respectively. Can be a single integer specifying
@@ -277,6 +295,7 @@ class ConvCaps2D(layers.Layer):
             kernel_initializer (str): A string identifier for one of the 
                 keras initializers. See the following documentation.
                 https://www.tensorflow.org/api_docs/python/tf/keras/initializers
+            kernel_regularizer: A tensorflow regularizer instance
             **kwargs: Arbitrary keyword arguments for keras.layers.Layer()   
         '''
         super(ConvCaps2D, self).__init__(**kwargs) # Call parent init
@@ -284,15 +303,15 @@ class ConvCaps2D(layers.Layer):
         # Check input arguments
         ######################################
         assert len(tf.shape(kernel_size)) < 3, 'kernel_size argument is too long.' \
-            'Was expecting an int or list of size 2'
+            ' Was expecting an int or list of size 2'
         assert len(tf.shape(strides)) < 3, 'stride argument is too long' \
-            'Was expecting an int or list of size 2'
+            ' Was expecting an int or list of size 2'
         assert len(tf.shape(capsule_dim)) < 3, 'Capsules can be either vectors or matrices,' \
-            'was expecting a capsule_dim no longer than 2 dimensions'
+            ' was expecting a capsule_dim no longer than 2 dimensions'
         assert routing == 'EM' or 'dynamic', 'Was expecting routing' \
-            'argument to be either dynamic or EM'
+            ' argument to be either dynamic or EM'
         assert activation == 'squash' or 'sigmoid' or 'norm', 'Got unexpected' \
-            'activation type'
+            ' activation type'
 
         # Set class attributes
         ######################################
@@ -305,6 +324,8 @@ class ConvCaps2D(layers.Layer):
         self.kernel_initializer = keras.initializers.get(kernel_initializer)
         self.built = False 
         self.routing = routing
+        self.kernel_regularizer = kernel_regularizer
+        self.routing_iter = routing_iterations
 
     def build(self, input_shapes):
         '''Builds the convolutional capsule layer
@@ -317,7 +338,7 @@ class ConvCaps2D(layers.Layer):
                 where input_caps_dim is the dimensionality of the capsules
                 in the previoues layer 
         '''
-        pose_shape = input_shapes[0]
+        pose_shape = input_shapes[0] # [batch_size, im_h, im_w, num_input_chan] + caps_dim
 
         # Get shape values
         input_channels = pose_shape[-3]
@@ -332,6 +353,7 @@ class ConvCaps2D(layers.Layer):
             name='kernel',
             shape=[self.num_channels, self.kernel_dim[0], self.kernel_dim[1], input_channels] + w_shape,
             initializer=self.kernel_initializer,
+            regularizer=self.kernel_regularizer,
             trainable=True
         ) 
 
@@ -366,11 +388,14 @@ class ConvCaps2D(layers.Layer):
             blocks (tuple): A tensor containing the inputs in block form
         '''
 
-        input_shape = inputs.shape
+        #input_shape = inputs.shape
+        input_shape = tf.shape(inputs)
 
         # Get number of steps for both height and width
-        h_steps = int((input_shape[1] - self.kernel_dim[0] + 1)/self.strides[0])
-        w_steps = int((input_shape[2] - self.kernel_dim[1] + 1)/self.strides[1])
+        # h_steps = int((input_shape[1] - self.kernel_dim[0] + 1)/self.strides[0])
+        # w_steps = int((input_shape[2] - self.kernel_dim[1] + 1)/self.strides[1])
+        h_steps = tf.cast((input_shape[1] - self.kernel_dim[0] + 1)/self.strides[0], dtype=tf.int32)
+        w_steps = tf.cast((input_shape[2] - self.kernel_dim[1] + 1)/self.strides[1], dtype=tf.int32)
 
         # Each block or capsules has volume k_h * k_w * num_input_channels
         # There is one block for each output capsule
@@ -446,21 +471,37 @@ class ConvCaps2D(layers.Layer):
         ############################
         input_poses = inputs[0]
         input_activations = inputs[1]
-        pose_shape = input_poses.shape
+        pose_shape = tf.shape(input_poses)
         input_caps_dim = [pose_shape[-2], pose_shape[-1]]
 
-        # input poses shape [batch_size, input_height, input_width, num_input_channels, input_caps_dim[0], input_caps_dim[1]]
-        # Input activations shape [batch_size, input_height, input_width, num_input_channels]
+        # input poses is 6D tensor with shape [batch_size, input_height, input_width, num_input_channels, input_caps_dim[0], input_caps_dim[1]]
+        # Input activations is 4D tensor with shape [batch_size, input_height, input_width, num_input_channels]
 
         # Calculate Votes from Poses
         ##############################
-        pose_blocks = self._to_blocks(input_poses)
+        # pose_blocks = self._to_blocks(input_poses)
+        poses_flat = tf.reshape(input_poses, shape=[-1, pose_shape[1], pose_shape[2], pose_shape[3]*pose_shape[4]*pose_shape[5]])
+        # pose_flat is 4D tensor with shape [batch_size, input_height, input_width, num_input_channels*input_caps_dim[0]*input_caps_dim[1]]
 
-        votes = self._get_votes(pose_blocks)
+        patches = tf.image.extract_patches(
+            poses_flat, 
+            sizes=[1, self.kernel_dim[0], self.kernel_dim[1], 1],
+            strides=[1, self.strides[0], self.strides[1], 1],
+            rates=[1, 1, 1, 1],
+            padding=self.padding.upper()
+        )
+
+        # Patches is 4D tensor with shape [batch_size, out_height, out_width, num_channels * input_caps_dim[0] * input_caps_dim[1] * k_h * k_w]
+        patches_shape = tf.shape(patches)
+        blocks = tf.reshape(patches, shape=[-1, patches_shape[1], patches_shape[2], self.kernel_dim[0], self.kernel_dim[1], pose_shape[3], pose_shape[4], pose_shape[5]])
+        # blocks is 8D tensor with shape [batch_size, out_height, out_width, k_h, k_w, num_input_channels] + input_caps_dims
+
+        votes = self._get_votes(blocks)
 
         # Get Image Shape Attributes
         ##############################
-        shape = votes.shape
+        #shape = votes.shape
+        shape = tf.shape(votes)
         im_height = shape[1] # Output height
         im_width = shape[2] # Output width
         num_votes_per_capsule = shape[4]*shape[5]*shape[6]
@@ -472,15 +513,15 @@ class ConvCaps2D(layers.Layer):
         votes = tf.reshape(votes, [-1, im_height, im_width, self.num_channels, num_votes_per_capsule] + self.capsule_dim)
         if self.routing == 'dynamic':
             # capsule_poses shape: [batch_size, im_height, im_width, num_out_channels] + capsule_dim
-            capsule_poses = routing.dynamic_routing(votes)
-            tf.print(capsule_poses)
+            capsule_poses = routing.dynamic_routing(votes, num_iter=self.routing_iter)
 
              # Calculate new capsule activations
             if self.activation == 'sigmoid':
                 raise ValueError('Sigmoid activation not yet supported for ConvCaps2D')
             else:
                 # Flatten capsule poses into vectors
-                shape = capsule_poses.shape
+                #shape = capsule_poses.shape
+                shape = tf.shape(capsule_poses)
                 vectors = tf.reshape(capsule_poses, shape=[-1, shape[1], shape[2]*shape[3]])
                 if self.activation == 'squash':
                     # Use squash function on capsule poses
@@ -490,9 +531,18 @@ class ConvCaps2D(layers.Layer):
             capsule_activations = tf.norm(vectors, axis=-1)
 
         elif self.routing == 'EM':
-            a_blocks = self._to_blocks(input_activations) # shape [batch_size, im_h, im_w, k_h, k_w, num_input_channels]
-            vote_activations = tf.reshape(a_blocks, [-1, im_height, im_width, num_votes_per_capsule])
-            capsule_poses, capsule_activations = routing.em_routing(votes, vote_activations, self.beta_a, self.beta_u)
+            # a_blocks = self._to_blocks(input_activations) # shape [batch_size, im_h, im_w, k_h, k_w, num_input_channels]
+            # vote_activations = tf.reshape(a_blocks, [-1, im_height, im_width, num_votes_per_capsule])
+            vote_activations = tf.image.extract_patches(
+                input_activations,
+                sizes=[1, self.kernel_dim[0], self.kernel_dim[1], 1],
+                strides=[1, self.strides[0], self.strides[1], 1],
+                rates=[1, 1, 1, 1],
+                padding=self.padding.upper()
+                )
+
+            # vote_activations is 4D tensor with shape [batch_size, im_h, im_w, num_votes_per_capsule]
+            capsule_poses, capsule_activations = routing.em_routing(votes, vote_activations, self.beta_a, self.beta_u, self.num_channels, self.routing_iter)
 
         else:
             raise ValueError('Was expecting either EM or dynamic for routing argument')
@@ -539,6 +589,8 @@ class DenseCaps(layers.Layer):
         routing (str): The kind of routing to use in this layer. Either
             'dynamic' or 'EM'. If EM, the capsule activations are calculated
             via the routing algorithm and the activation argument is ignored
+        routing_iterations (int): The number of iterations to run the routing
+            algorithm during the forward pass
         activation (str): The method to use when calculating the capsule
             activations (probability of entity existence). Either
             'squash', 'sigmoid' or 'norm'. norm uses the length of the
@@ -563,18 +615,19 @@ class DenseCaps(layers.Layer):
         initializer (str): A string identifier for one of the 
                 keras initializers. See the following documentation.
                 https://www.tensorflow.org/api_docs/python/tf/keras/initializers
+        regularizer: A tensorflow regularizer instance applied to layer weights
         **kwargs: Arbitrary keyword arguments for keras.layers.Layer()   
     '''
-    def __init__(self, num_capsules, capsule_dim, routing='EM', activation='squash', add_coordinates=False, pose_coords=None, initializer='random_normal', **kwargs):
+    def __init__(self, num_capsules, capsule_dim, routing='EM', routing_iterations=3, activation='squash', add_coordinates=False, pose_coords=None, initializer='random_normal', regularizer=None, **kwargs):
         super(DenseCaps, self).__init__(**kwargs)
 
         # Check inputs
         assert activation == 'squash' or 'sigmoid' or 'norm', 'Got unexpected' \
-            'activation type'
+            ' activation type'
         assert routing == 'EM' or 'dynamic', 'Was expecting routing' \
-            'argument to be either dynamic or EM'
+            ' argument to be either dynamic or EM'
         assert len(tf.shape(capsule_dim)) < 3, 'Capsules can be either vectors or matrices,' \
-            'was expecting a capsule_dim no longer than 2 dimensions'
+            ' was expecting a capsule_dim no longer than 2 dimensions'
         assert type(num_capsules) == int, 'num_capsules must be an integer'
 
         self.num_capsules = num_capsules
@@ -585,6 +638,8 @@ class DenseCaps(layers.Layer):
         self.initializer = keras.initializers.get(initializer)
         self.add_coordinates = add_coordinates
         self.pose_coords = pose_coords
+        self.regularizer = regularizer
+        self.routing_iter = routing_iterations
 
     def build(self, input_shapes):
         '''Builds the dense capsule layer
@@ -599,7 +654,7 @@ class DenseCaps(layers.Layer):
 
         # Get the shape of the weight matrices
         input_caps_dim = pose_shape[-2:]
-        middle_dims = pose_shape[1:-2] # contains spatial_shape + num_channels or just num_capsukes
+        middle_dims = pose_shape[1:-2] # contains spatial_shape + num_channels or just num_capsules
         w_shape, self.trans_in, self.trans_out = tools.get_weight_matrix(input_caps_dim, self.capsule_dim)
 
         # Create the weight matrices
@@ -607,6 +662,7 @@ class DenseCaps(layers.Layer):
             name='w',
             shape=[self.num_capsules] + middle_dims + [w_shape[0], w_shape[1]],
             initializer=self.initializer,
+            regularizer=self.regularizer,
             trainable=True
         )
 
@@ -638,7 +694,7 @@ class DenseCaps(layers.Layer):
         '''
 
         assert type(inputs) == list, 'Was expecting layer inputs to be a' \
-            'list containing a tensor for poses and a tensor for activations'
+            ' list containing a tensor for poses and a tensor for activations'
 
         # [batch_size, num_input_caps] + input_caps_dim
         # or [batch_size] + spatial_shape + [num_input_channels] + input_caps_dim
@@ -662,12 +718,13 @@ class DenseCaps(layers.Layer):
 
         if self.add_coordinates:
             assert self.pose_coords is not None, 'add_coordinates is true but was' \
-                'not provided a list of pose values in pose_coords to add the coordinates to'
+                ' not provided a list of pose values in pose_coords to add the coordinates to'
             
             votes = tools.add_coordinates(votes, self.pose_coords)
 
         # votes shape [batch_size, num_capsules] + spatial_shape + [num_input_channels] + out_caps_dim
-        votes_shape = votes.shape
+        #votes_shape = votes.shape
+        votes_shape = tf.shape(votes)
 
         # Flatten votes
         num_votes_per_cap = tf.reduce_prod(votes_shape[2:-2])
@@ -676,14 +733,15 @@ class DenseCaps(layers.Layer):
         # Routing
         #######################
         if self.routing == 'dynamic':
-            capsule_poses = routing.dynamic_routing(votes)
+            capsule_poses = routing.dynamic_routing(votes, num_iter=self.routing_iter)
 
             # Calculate new capsule activations
             if self.activation == 'sigmoid':
                 raise ValueError('Sigmoid activation not yet supported for DenseCaps')
             else:
                 # Flatten capsule poses into vectors
-                shape = capsule_poses.shape
+                #shape = capsule_poses.shape
+                shape = tf.shape(capsule_poses)
                 vectors = tf.reshape(capsule_poses, shape=[-1, shape[1], shape[2]*shape[3]])
                 if self.activation == 'squash':
                     # Use squash function on capsule poses
@@ -695,7 +753,7 @@ class DenseCaps(layers.Layer):
         elif self.routing == 'EM':
             # flatten activations
             a = tf.reshape(input_activations, shape=[-1, num_votes_per_cap])
-            capsule_poses, capsule_activations = routing.em_routing(votes, a, self.beta_a, self.beta_u)
+            capsule_poses, capsule_activations = routing.em_routing(votes, a, self.beta_a, self.beta_u, self.num_capsules, self.routing_iter)
         else:
             raise ValueError('Was expecting either EM or dynamic for routing argument')
             
@@ -770,3 +828,316 @@ class FlattenCaps(layers.Layer):
         output_activations = tf.reshape(activations, shape=[-1] + list(num_capsules) + caps_dim)
 
         return output_poses, output_activations  
+
+class ConvCaps2DLowMem(layers.Layer):
+    '''A Two Dimensional Convolutional Capsule Layer
+
+    A convolutional capsule layer that uses a kernel/mask of weights to
+    calculate 'blocks' of votes using the capsules from a previous layer.
+    It then uses routing to generate its own capsules from these votes. 
+    The inputs to this layer must be in capsule format.
+
+    An experimental version that uses significantly lower memory
+    '''
+    def __init__(self, num_channels, kernel_size, capsule_dim, routing='EM', strides=1, padding='same', activation='sigmoid', kernel_initializer='he_normal', **kwargs):
+        '''A Two Dimensional Convolutional Capsule Layer
+
+        A convolutional capsule layer that uses routing to generate higher
+        level capsules from a previous capsule layer.
+
+        Args:
+            num_channels (int): The number channels in the capsule layer.
+                Sort of like the number of filters for a convolutional layer
+            kernel_size(list or int): An integer or tuple list of 2 integers,
+                specifying the height and width of the 2d convolution 
+                window.
+            capsule_dim (int or list): The dimensionality of capsules in
+                this layer. Capsules are vectors and hence capsule_dim
+                is the number of values in the vector. This does not 
+                include the capsule activation as a parameter in the vector 
+                as it is calculated from the vector itself. Will also accept
+                a list of integers describing the dimensions of a tuple or 
+                pose matrix, which will in turn be flattened into a vector
+                during computation. Eg. capsdim = (4, 4) -> 16
+            routing (str): The kind of routing to use in this layer. Either
+                'dynamic' or 'EM'. If EM, the capsule activations are calculated
+                via the routing algorithm and the activation argument is ignored
+            strides (int or list): A list of two integers
+                that specify the stride of convolution along the height
+                and width respectively. Can be a single integer specifying
+                the same value for both spatial dimensions
+            padding (str): one of 'valid' or 'same', case sensitive.
+                valid means no padding, same means even padding along
+                both dimensions such that the output of the convolution
+                is the same shape as the input
+            activation (str): The method to use when calculating the capsule
+                activations (probability of entity existence). Either
+                'squash', 'sigmoid' or 'norm'. norm uses the length of the
+                vector as the activation. squash uses the squash function
+                and then takes the length. sigmoid uses the sigmoid function 
+                on the weighted sum of the capsule poses from the previous layer.
+                Note that sigmoid should only be used if the following layer
+                uses EM routing. If routing is 'EM' for this layer then this
+                argument is ignored
+            kernel_initializer (str): A string identifier for one of the 
+                keras initializers. See the following documentation.
+                https://www.tensorflow.org/api_docs/python/tf/keras/initializers
+            **kwargs: Arbitrary keyword arguments for keras.layers.Layer()   
+        '''
+        super(ConvCaps2DLowMem, self).__init__(**kwargs) # Call parent init
+
+        # Check input arguments
+        ######################################
+        assert len(tf.shape(kernel_size)) < 3, 'kernel_size argument is too long.' \
+            'Was expecting an int or list of size 2'
+        assert len(tf.shape(strides)) < 3, 'stride argument is too long' \
+            'Was expecting an int or list of size 2'
+        assert len(tf.shape(capsule_dim)) < 3, 'Capsules can be either vectors or matrices,' \
+            'was expecting a capsule_dim no longer than 2 dimensions'
+        assert routing == 'EM' or 'dynamic', 'Was expecting routing' \
+            'argument to be either dynamic or EM'
+        assert activation == 'squash' or 'sigmoid' or 'norm', 'Got unexpected' \
+            'activation type'
+
+        # Set class attributes
+        ######################################
+        self.num_channels = num_channels
+        self.kernel_dim = tuple(tools.arg_2_list(kernel_size, n=2)) # Convert to tuple of length 2
+        self.capsule_dim = tools.arg_2_list(capsule_dim, n=2, fill='ones')
+        self.strides = tuple(tools.arg_2_list(strides, n=2)) # Convert to tuple of length 2
+        self.padding = padding
+        self.activation = activation
+        self.kernel_initializer = keras.initializers.get(kernel_initializer)
+        self.built = False 
+        self.routing = routing
+
+    def build(self, input_shapes):
+        '''Builds the convolutional capsule layer
+            
+        Args:
+            input_shape (list): A list containing the shapes for both
+                the capsule poses and activations. Capsule pose shape
+                should be in form:
+                    [batch_size, im_height, im_width, num_input_channels] + input_caps_dim
+                where input_caps_dim is the dimensionality of the capsules
+                in the previoues layer 
+        '''
+        pose_shape = input_shapes[0]
+
+        # Get shape values
+        input_channels = pose_shape[-3]
+        input_caps_dim = [pose_shape[-2], pose_shape[-1]]
+
+        # Determine the shape of the weight matrices, and whether or not
+        # The inputs or outputs need to be transposed to get desired shape
+        w_shape, self.trans_in, self.trans_out = tools.get_weight_matrix(input_caps_dim, self.capsule_dim)
+
+        # Define Trainable Variables
+        self.kernel = self.add_weight( 
+            name='kernel',
+            shape=[self.num_channels, self.kernel_dim[0], self.kernel_dim[1], input_channels] + w_shape,
+            initializer=self.kernel_initializer,
+            trainable=True
+        ) 
+
+        if self.routing == 'EM':
+            # Discriminatively learned weights used in routing
+            # One for each capsule type/channel
+            self.beta_a = self.add_weight(
+                name='beta_a',
+                shape=[1, 1, 1, self.num_channels],
+                initializer=keras.initializers.glorot_uniform()
+            )
+            self.beta_u = self.add_weight(
+                name='beta_u',
+                shape=[1, 1, 1, self.num_channels],
+                initializer=keras.initializers.glorot_uniform()
+            )
+
+        self.built = True
+
+    def _one_block_routing(self, input_poses, input_activations):
+        '''Performs the layer routing one 'block' at a time
+
+        Uses the kernel size to transform the inputs into the block
+        form, (k_h, k_w, num_channels). Then multiplies by kernel to
+        obtain votes and performs the routing to obtain the output capsules
+        one at a time (all channels done at same time). 
+
+        Args:
+            input_poses (tensor): The poses of the input capsules with
+                dim 0 must be batch size, dim 1 must be image height and
+                dim 2 must be image width
+                [batch_size, im_h, im_w, num_caps] + remaining_shape
+            input_activations (tensor): The activations of the input capsules.
+                dim 0 must be batch size, dim 1 must be image height and
+                dim 2 must be image width
+        Returns:
+            capsules (list): A list containing the output capsule poses 
+                at index 0 and the capsule activations at index 1
+        '''
+
+        input_shape = input_poses.shape
+
+        # Get number of steps for both height and width
+        h_steps = int((input_shape[1] - self.kernel_dim[0] + 1)/self.strides[0]) # h_steps = output_im_height
+        w_steps = int((input_shape[2] - self.kernel_dim[1] + 1)/self.strides[1]) # w_steps = output_im_width
+
+        # Each block or capsules has volume k_h * k_w * num_input_channels
+        # There is one block for each output capsule
+        output_capsules = []
+        output_capsule_activations = []
+        for h_step in range(h_steps): # iterate vertically
+            row = h_step*self.strides[0]
+            row_of_poses = []
+            row_of_activations = []
+            for w_step in range(w_steps): # iterate horizontally
+                col = w_step*self.strides[1]
+
+                # pose_block shape: [batch_size, k_h, k_w, num_input_channels] + input_caps_dims
+                pose_block = input_poses[:, row:row+self.kernel_dim[0], col:col+self.kernel_dim[1]]
+
+                # Add two empty dims for new_im_height and new_im_width of next layer
+                pose_block = tf.expand_dims(tf.expand_dims(pose_block, axis=1), axis=1)
+                # pose block shape [batch_size, 1, 1, k_h, k_w, num_in_chans] + input_caps_dim
+
+                # multiply by pose block by kernel to get a block of votes for each output channel
+                vote_blocks = self._get_votes(pose_block)
+                
+                # vote blocks shape [batch_size, 1, 1, num_out_chan, k_h, k_w, num_in_chan] + out_caps_dims
+                shape = vote_blocks.shape
+                num_votes_per_capsule = shape[4]*shape[5]*shape[6] # k_h x k_w x num_in_chan
+                vote_blocks_flat = tf.reshape(vote_blocks, [-1, 1, 1, self.num_channels, num_votes_per_capsule] + self.capsule_dim) # flatten blocks
+
+                # Routing
+                ################
+                if self.routing == 'dynamic':
+                    # capsule_pose shape: [batch_size, 1, 1, num_out_channels] + capsule_dim
+                    capsule_pose = routing.dynamic_routing(vote_blocks_flat) # The capsule poses for a given (im_h, im_w) coord
+                    # Calculate new capsule activations
+                    if self.activation == 'sigmoid':
+                        raise ValueError('Sigmoid activation not yet supported for ConvCaps2D')
+                    else:
+                        # Flatten capsule pose into vector
+                        shape = capsule_pose.shape
+                        vectors = tf.reshape(capsule_pose, shape=[-1, shape[1], shape[2]*shape[3]])
+                        if self.activation == 'squash':
+                            # Use squash function on capsule poses
+                            vectors = tools.squash(vectors)
+                    # Calculate length of each capsule vector
+                    capsule_activation = tf.norm(vectors, axis=-1)
+                elif self.routing == 'EM':
+                    # Get activations for each vote
+                    a_blocks = input_activations[:, row:row+self.kernel_dim[0], col:col+self.kernel_dim[1]] # get blocks of activations same as blocks of poses
+                    a_blocks = tf.expand_dims(tf.expand_dims(a_blocks, axis=1), axis=1) # add two empty dims for im_h and im_w
+                    # a_blocks shape [batch_size, 1, 1, k_h, k_w, num_in_chans]
+                    vote_activations = tf.reshape(a_blocks, [-1, 1, 1, num_votes_per_capsule]) # flatten blocks
+                    capsule_pose, capsule_activation = routing.em_routing(vote_blocks_flat, vote_activations, self.beta_a, self.beta_u) # route votes into output capsules
+                else:
+                    raise ValueError('Was expecting either EM or dynamic for routing argument', flush=True)
+
+                # capsule_pose shape [batch_size, 1, 1, num_out_channels] + capsule_dim
+                # capsule_activation shape [batch_size, 1, 1, num_out_channels]
+
+                row_of_poses.append(capsule_pose) # Create a row of output capsules
+                row_of_activations.append(capsule_activation) # create row of output activations
+
+            # Append rows together to create a 2d matrix/image of capsules
+            # row shape [batch_size, 1, w_step, num_out_channels]
+            output_capsules.append(tf.concat(row_of_poses, axis=2))
+            output_capsule_activations.append(tf.concat(row_of_activations, axis=2))
+
+        # Concat lists of row tensors into one tensor
+        output_capsules = tf.concat(output_capsules, axis=1)
+        output_capsule_activations = tf.concat(output_capsule_activations, axis=1)
+
+        # output shape [batch_size, output_im_height, output_im_width, num_channels] + remaining shape
+        return [output_capsules, output_capsule_activations]
+
+    def _get_votes(self, pose_blocks):
+        '''Calculates votes for routing
+        
+        Multiplies pose blocks by kernel weights to obtain votes for
+        routing
+
+        Args:
+            pose_blocks (tuple): The poses of the input capsules in block
+                form. Should be of shape:
+
+                [batch_size, im_height, im_width, k_h, k_w, num_input_channels, input_caps_dim]
+
+        Returns:
+            votes (tuple): The votes for each output capsule.
+        '''
+        
+        # Add empty dim to allow multiple output channels
+        # [btch_s, im_h, im_w, k_h, k_w, in_chan] + in_caps_dim -> [btch_s, im_h, im_w, 1, k_h, k_w, in_chan] + in_caps_dim
+        pose_blocks = tf.expand_dims(pose_blocks, axis=3)
+        
+        if self.trans_in == True:
+            # Transpose the last two dimensions
+            pose_blocks = tf.transpose(pose_blocks, [0, 1, 2, 3, 4, 5, 6, 8, 7])
+
+        # kernel_shape [out_chan, k_h, k_w, in_chan, in_caps_dim]
+        votes = tf.matmul(pose_blocks, self.kernel)
+
+        if self.trans_out == True:
+            # Transpose the last two dimensions
+            votes = tf.transpose(votes, [0, 1, 2, 3, 4, 5, 6, 8, 7])
+
+        # final votes shape
+        # [batch_size, im_h, im_w, out_chan, k_h, k_w, in_chan] + out_caps_dim
+
+        return votes
+
+    def call(self, inputs):
+        '''Uses routing to perform the forward propagation of this layer
+
+        Args:
+            inputs (list): A list containing the tuples for capsule poses
+                and activations. Capsule poses should have shape:
+                    [batch_size, im_height, im_width, num_input_channels] + input_caps_dim
+
+        Returns:
+            capsules (list): A list containing the capsule poses at index 0 
+                and the capsule activations at index 1
+        '''
+        # Unpack Data
+        ############################
+        input_poses = inputs[0]
+        input_activations = inputs[1]
+        pose_shape = input_poses.shape
+        input_caps_dim = [pose_shape[-2], pose_shape[-1]]
+
+        # input poses shape [batch_size, input_height, input_width, num_input_channels, input_caps_dim[0], input_caps_dim[1]]
+        # Input activations shape [batch_size, input_height, input_width, num_input_channels]
+
+        # Routing
+        ############################
+
+        # To reduce memory requirements, we route to output capsules one kernel/block at a time
+        capsule_poses, capsule_activations = self._one_block_routing(input_poses, input_activations)
+        
+        return [capsule_poses, capsule_activations]
+
+    def get_config(self):
+        '''Returns the layer configuration
+
+        Allows the layer to be serializable
+
+        Returns:
+            config (dict): Dictionary containing th input arguments to
+                the layer
+        '''
+        config = {
+            'num_channels' : self.num_channels,
+            'kernel_size' : self.kernel_dim,
+            'capsule_dim': self.capsule_dim,
+            'routing': self.routing,
+            'stride': self.strides,
+            'padding': self.padding,
+            'activation': self.activation,
+            'kernel_initializer': self.kernel_initializer,
+        }
+        base_config = super(ConvCaps2D, self).get_config()
+        return dict(list(base_config.items()) + list(config.items())) 

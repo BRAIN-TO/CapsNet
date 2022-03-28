@@ -1,0 +1,12 @@
+batch_size: 75
+epochs: 20
+loss: mse_cosine
+optimizer:
+  clipvalue: 0.5
+  decay: 0.005
+  learning_rate: 0.1
+  momentum: 0.9
+  name: SGD
+  nesterov: true
+roi: ROI_VC
+val_batch_size: 50
