@@ -1,5 +1,11 @@
 tensorflow>=2.4.0
 pillow>=8.1.0
+scipy
+pyyaml
+scikit-learn
+scikit-image
+matplotlib
+tqdm
 numpy
 
 pandas
