@@ -3,6 +3,11 @@
 #Public API's
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+import pathlib
+capsnet_path = pathlib.Path(__file__).parent.resolve().parent.resolve()
+print('Base Dir: ', capsnet_path)
+import sys
+sys.path.append(str(capsnet_path)) # Allows imports from capsnet folder
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.datasets import mnist
@@ -79,13 +84,13 @@ testing = model.evaluate(x_test, y_test, batch_size=training_params['val_batch_s
 # Model Saving
 if save:
     # Save full model. Also save weights
-    model.save_weights('models/' + model_name + '/model_weights', save_format='tf')
+    model.save_weights(os.path.join(capsnet_path, 'trained_models', model_name, '/model_weights'), save_format='tf')
 
-    with open('models/' + model_name + '/train_config.yaml', 'w') as file:
+    with open(os.path.join(capsnet_path, 'trained_models', model_name, 'train_config.yaml'), 'w') as file:
         yaml.dump(training_params, file) # Save archetecture
 
-    with open('models/' + model_name + '/train-history.json', 'w') as file:
+    with open(os.path.join(capsnet_path, 'models', model_name, 'train-history.json'), 'w') as file:
         json.dump(training.history, file) # save training history
 
-    with open('models/' + model_name + '/test-history.json', 'w') as file:
+    with open(os.path.join(capsnet_path, 'models', model_name, 'test-history.json'), 'w') as file:
         json.dump(testing, file) # save testing history

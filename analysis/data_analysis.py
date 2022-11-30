@@ -1,7 +1,11 @@
 #Public API's
-from dataclasses import dataclass
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+import pathlib
+capsnet_path = pathlib.Path(__file__).parent.resolve().parent.resolve()
+print('Base Dir: ', capsnet_path)
+import sys
+sys.path.append(str(capsnet_path)) # Allows imports from capsnet folder
 import tensorflow as tf
 from tensorflow import keras
 from bdpy.mri.image import export_brain_image
@@ -15,7 +19,6 @@ import os
 import tensorflow_probability as tfp
 # Custom Imports
 from pycaps.fmri_models import *
-import pycaps.losses as losses
 from misc.helper_functions import *
 from keras.losses import cosine_similarity, mean_squared_error, mean_absolute_error
 from misc.kamitani_data_handler import kamitani_data_handler
@@ -25,12 +28,12 @@ from misc.kamitani_data_handler import kamitani_data_handler
 model_name = 'caps_encoder_test2'
 
 # Directory paths
-base_dir = ''
-matlab_file = base_dir + 'kamitani_data/fmri/Subject3.mat'
-test_image_ids = base_dir + 'kamitani_data/images/image_test_id.csv'
-train_image_ids = base_dir + 'kamitani_data/images/image_training_id.csv'
-images_npz = base_dir + 'kamitani_data/images/images_112.npz'
-template= base_dir + 'kamitani_data/func_raw/sub-03_ses-perceptionTest01_task-perception_run-01_bold_preproc.nii.gz' # A template nifti file
+base_dir = str(capsnet_path)
+matlab_file = os.path.join(base_dir, 'kamitani_data/fmri/Subject3.mat')
+test_image_ids = os.path.join(base_dir, 'kamitani_data/images/image_test_id.csv')
+train_image_ids = os.path.join(base_dir, 'kamitani_data/images/image_training_id.csv')
+images_npz = os.path.join(base_dir, 'kamitani_data/images/images_112.npz')
+template= os.path.join(base_dir, 'kamitani_data/func_raw/sub-03_ses-perceptionTest01_task-perception_run-01_bold_preproc.nii.gz') # A template nifti file
 
 # Load Data
 print('Loading Data...')
@@ -51,16 +54,15 @@ print(NUM_VOXELS)
 # model = CapsEncoder(num_voxels=NUM_VOXELS, num_output_capsules=10)
 # model = EncoderMach3(NUM_VOXELS)
 # print(model.class_name)
-# model.load_weights('models/' + model_name + '/model_weights').expect_partial()
-# model.load_weights('models/' + model_name + '/best_ckpt').expect_partial()
+# model.load_weights('../trained_models/' + model_name + '/model_weights').expect_partial()
+# model.load_weights('../trained_models/' + model_name + '/best_ckpt').expect_partial()
 
 # Calculating model predictions
 # print('Getting Model Predictions...')
-y_pred_gaziv = np.loadtxt('models/beliy/gaziv_y_pred.csv', delimiter=',')
+y_pred_gaziv = np.loadtxt(os.path.join(base_dir, 'trained_models/beliy/gaziv_y_pred.csv'), delimiter=',')
 # y_pred = model.predict(x_test)
-# np.savetxt('models/' + model_name + '/y_pred.csv', y_pred, delimiter=',')
-y_pred = np.loadtxt('models/' + model_name + '/y_pred.csv', delimiter=',')
-# y_pred = np.loadtxt('models/' + model_name + '/gaziv_y_pred.csv', delimiter=',')
+# np.savetxt(os.path.join(base_dir, 'trained_models', model_name, 'y_pred.csv'), y_pred, delimiter=',')
+y_pred = np.loadtxt(os.path.join(base_dir, 'trained_models', model_name, 'y_pred.csv'), delimiter=',')
 # y_pred = np.broadcast_to(np.mean(y_train, axis=0), shape=y_test.shape)
 # y_pred = np.add(y_pred, np.random.exponential(0.04, y_pred.shape))
 
@@ -77,6 +79,7 @@ for i in range(50):
     correlation.append(stats.pearsonr(y_test[i], y_pred[i])[0]) # returns correlation coefficient r and two tailed p-value
     #g_correlation.append(stats.pearsonr(y_test[i], y_pred_gaziv[i])[0])
 
+exit()
 # print(tf.shape(correlation))
 # print(['{0:0.3f}'.format(i) for i in correlation])
 voxel_corr = np.array(voxel_corr)
@@ -121,7 +124,7 @@ print(np.mean(vc_sorted[-100:]))
 import matplotlib
 matplotlib.rcParams.update({'font.size': 16})
 #plt.figure(figsize=[6, 6])
-# b_vc = np.loadtxt('models/beliy_vox_corr.csv', delimiter=',')
+# b_vc = np.loadtxt(os.path.join(base_dir, 'trained_models/beliy_vox_corr.csv'), delimiter=',')
 # plt.scatter(b_vc, voxel_corr, s=0.5)
 # lims = [-0.5, 1]
 # plt.plot(lims, lims, '--', color='red', alpha=0.5, zorder=0)
@@ -140,7 +143,7 @@ matplotlib.rcParams.update({'font.size': 16})
 # p=0.001 @ r=0.6788
 
 
-# b_vc = np.loadtxt('models/beliy/beliy_vox_corr.csv', delimiter=',')
+# b_vc = np.loadtxt(os.path.join(base_dir, 'trained_models/beliy/beliy_vox_corr.csv'), delimiter=',')
 # diff = b_vc - voxel_corr
 # avg = (b_vc + voxel_corr)/2
 # # print(np.max(diff))
@@ -239,7 +242,7 @@ matplotlib.rcParams.update({'font.size': 16})
 
 # vt1 = np.where(vc_std > abs(np.min(vc_std)))[0]
 # np.savetxt(os.path.join('trained_encoders', model_name, 'idx_above_thresh.csv'), vt, delimiter=',')
-# vt_beliy = np.loadtxt('models/beliy/idx_above_thresh.csv', delimiter=',')
+# vt_beliy = np.loadtxt(os.path.join(base_dir, 'trained_models/beliy/idx_above_thresh.csv'), delimiter=',')
 # vt = np.union1d(vt1, vt_beliy).astype(int)
 # vb = np.where(vc_std < abs(np.min(vc_std)))[0]
 # print(len(vt1))
@@ -285,7 +288,7 @@ roi_names = ['ROI_V1', 'ROI_V2', 'ROI_V3', 'ROI_V4', 'ROI_LOC', 'ROI_FFA', 'ROI_
 vc_rs = voxel_corr * stds
 rwc = np.sign(vc_rs)*np.sqrt(abs(vc_rs))
 
-vc_beliy = np.loadtxt('models/beliy/beliy_vox_corr.csv', delimiter=',')
+vc_beliy = np.loadtxt(os.path.join(base_dir, 'trained_models/beliy/beliy_vox_corr.csv'), delimiter=',')
 vc_rs_beliy = vc_beliy * np.std(y_pred_gaziv, axis=0)
 rwc_beliy = np.sign(vc_rs_beliy)*np.sqrt(abs(vc_rs_beliy))
 

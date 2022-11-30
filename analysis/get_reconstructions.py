@@ -1,6 +1,11 @@
 # Public API's
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+import pathlib
+capsnet_path = pathlib.Path(__file__).parent.resolve().parent.resolve()
+print('Base Dir: ', capsnet_path)
+import sys
+sys.path.append(str(capsnet_path)) # Allows imports from capsnet folder
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.datasets import mnist
@@ -25,7 +30,7 @@ x_train = x_train.reshape(-1, 28, 28, 1).astype('float32')/255.0
 x_test = x_test.reshape(-1, 28, 28, 1).astype('float32')/255.0
 
 print('Loading Model...')
-model = keras.models.load_model('models/' + model_name + '/saved_model', custom_objects={'margin_recon_loss' : losses.margin_recon_loss})
+model = keras.models.load_model(os.path.join(capsnet_path, 'trained_models', model_name, 'saved_model'), custom_objects={'margin_recon_loss' : losses.margin_recon_loss})
 
 print('Getting Reconstructions')
 sample = x_train[100, :, :, :]
@@ -34,11 +39,11 @@ print(tf.shape(sample))
 a, p, recon_image = model.call(sample) # Returns the activations, poses and reconstructed image
 
 recon_image = tf.reshape(recon_image, [28, 28, 1])
-tf.keras.preprocessing.image.save_img('images/im100.png', recon_image, data_format='channels_last')
+tf.keras.preprocessing.image.save_img(os.path.join(capsnet_path, 'images/im100.png'), recon_image, data_format='channels_last')
 
 # Save the original sample image
 sample = tf.reshape(sample, [28, 28, 1])
-tf.keras.preprocessing.image.save_img('images/im100-sample.png', sample, data_format='channels_last')
+tf.keras.preprocessing.image.save_img(os.path.join(capsnet_path, 'images/im100-sample.png'), sample, data_format='channels_last')
 
 # Modify capsules to see how dimensions affect reconstruction
 dim = [1, 0] # Dimensions to vary
@@ -60,4 +65,4 @@ print(tf.shape(images))
 imlist = [images[i, :, :] for i in range(tf.shape(images)[0])]
 collage = tf.concat(imlist, axis=1)
 print(tf.shape(collage))
-tf.keras.preprocessing.image.save_img('images/collage_dim1.png', collage, data_format='channels_last')
+tf.keras.preprocessing.image.save_img(os.path.join(capsnet_path, 'images/collage_dim1.png'), collage, data_format='channels_last')

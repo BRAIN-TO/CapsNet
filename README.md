@@ -25,8 +25,8 @@ Contains a tensforflow implementation of Capsule networks proposed in the papers
 
 [3] G. E. Hinton, S. Sabour, and N. Frosst, “Matrix capsules with EM routing,” presented at the International Conference on Learning Representations, Vancouver, Canada, Feb. 2018. Accessed: Oct. 15, 2020. [Online]. Available: https://openreview.net/forum?id=HJWLfGWRb
 
-In the future, this could be abstracted from this research project to provide an 
-API extension to tensorflow for training and experimenting with capsule networks. 
+In the future, this could be abstracted from this research project to provide an
+API extension to tensorflow for training and experimenting with capsule networks.
 Currently includes:
 
   - Layer subclasses for primary, convolution and class/dense capsule layers

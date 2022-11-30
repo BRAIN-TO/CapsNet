@@ -4,6 +4,11 @@ print('Importing Packages...', flush=True)
 #Public API's
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+import pathlib
+capsnet_path = pathlib.Path(__file__).parent.resolve().parent.resolve()
+print('Base Dir: ', capsnet_path)
+import sys
+sys.path.append(str(capsnet_path)) # Allows imports from capsnet folder
 import tensorflow as tf
 from tensorflow import keras
 import numpy as np
@@ -163,27 +168,29 @@ training = model.fit(train_gen,
 testing = model.evaluate(x_test, y_test, batch_size=training_params['val_batch_size'], return_dict=True)
 
 # Model Saving
+# Model Saving
 if save:
     # Save full model. Also save weights
-    model.save_weights('models/' + model_name + '/model_weights', save_format='tf')
+    model.save_weights(os.path.join(capsnet_path, 'trained_models', model_name, 'model_weights'), save_format='tf')
     plt.plot(training.history['loss'])
     plt.plot(training.history['val_loss'])
     plt.legend(['train_loss', 'val_loss'])
-    plt.savefig('models/' + model_name + '/val_loss.png')
+    plt.savefig(os.path.join(capsnet_path, 'trained_models', model_name, '/val_loss.png'))
 
-    with open('models/' + model_name + '/train_config.yaml', 'w') as file:
-        yaml.dump(training_params, file) # Save training hyperparams
+    with open(os.path.join(capsnet_path, 'trained_models', model_name, 'train_config.yaml'), 'w') as file:
+        yaml.dump(training_params, file) # Save archetecture
 
-    with open('models/' + model_name + '/config.yaml', 'w') as file:
+    with open(os.path.join(capsnet_path, 'trained_models', model_name, 'config.yaml'), 'w') as file:
         yaml.dump(model.get_config(), file) # Save archetecture
 
-    with open('models/' + model_name + '/test-history.json', 'w') as file:
+    with open(os.path.join(capsnet_path, 'trained_models', model_name, 'test-history.json'), 'w') as file:
         json.dump(testing, file) # save testing history
-
+        
+    # convert lr to float64
     if 'lr' in training.history.keys():
         training.history['lr'] = [np.float64(lr) for lr in training.history['lr']]
 
-    with open('models/' + model_name + '/train-history.json', 'w') as file:
+    with open(os.path.join(capsnet_path, 'trained_models', model_name, '/train-history.json'), 'w') as file:
         json.dump(training.history, file) # save training history
 
 print('Total Runtime: ', time.time() - ts)
