@@ -12,7 +12,7 @@ class kamitani_data_handler():
     frames_forward - how many video frames to take after FMRI frame
     """
 
-    def __init__(self, matlab_file ,test_img_csv = 'KamitaniData/imageID_test.csv',train_img_csv = 'KamitaniData/imageID_training.csv',voxel_spacing =3,log = 0 ):
+    def __init__(self, matlab_file ,test_img_csv = 'KamitaniData/imageID_test.csv',train_img_csv = 'KamitaniData/imageID_training.csv',log = 0 ):
         mat = loadmat(matlab_file)
         self.data = mat['dataSet'][:,3:]
         self.sample_meta = mat['dataSet'][:,:3]
@@ -27,7 +27,6 @@ class kamitani_data_handler():
         self.test_img_id = test_img_df[0].values
         self.train_img_id = train_img_df[0].values
         self.sample_type = {'train':1 , 'test':2 , 'test_imagine' : 3}
-        self.voxel_spacing = voxel_spacing
 
         self.log = log
 
@@ -38,6 +37,8 @@ class kamitani_data_handler():
         else:
             return self.voxel_meta[index]
 
+    def get_meta_keys(self):
+        print(self.meta_keys)
 
     def print_meta_desc(self):
         print(self.meta_desc)
@@ -60,6 +61,7 @@ class kamitani_data_handler():
         test_labels  =  []
         imag_labels = []
         for id in img_ids_test:
+            # returns index in self.test_img_id id is located
             idx = (np.abs(id - self.test_img_id)).argmin()
             test_labels.append(idx)
 
@@ -89,7 +91,8 @@ class kamitani_data_handler():
 
 
 
-    def get_data(self,normalize =1 ,roi = 'ROI_VC',imag_data = 0,test_run_list = None):   # normalize 0-no, 1- per run , 2- train/test seperatly
+    def get_data(self,normalize =1, scale='standard', roi = 'ROI_VC',imag_data = 0,test_run_list = None, remove_outliers=0):   # normalize 0-no, 1- per run , 2- train/test seperatly
+        # scale 'standard' or 'robust'
         type = self.get_meta_field('DataType')
         train = (type == self.sample_type['train'])
         test = (type == self.sample_type['test'])
@@ -110,7 +113,20 @@ class kamitani_data_handler():
             data_norm = np.zeros(data.shape)
 
             for r in range(num_runs):
-                data_norm[r==run] = sklearn.preprocessing.scale(data[r==run])
+                if (scale=='standard'):
+                    data_norm[r==run] = sklearn.preprocessing.scale(data[r==run])
+                elif (scale=='robust'):
+                    data_norm[r==run] = sklearn.preprocessing.robust_scale(data[r==run])
+
+                if (remove_outliers == 1):
+                    q3, q1 = np.percentile(data_norm[r==run], [75, 25], axis=0)
+                    iqr = q3 - q1
+                    tl = q1 - 1.5*iqr
+                    th  = q3 + 1.5*iqr
+                    for i in range(data_norm.shape[1]):
+                        data_norm[data_norm[:, i] <= tl[i], i] = tl[i]
+                        data_norm[data_norm[:, i] >= th[i], i] = th[i]
+
             train_data = data_norm[train]
             test_data  = data_norm[test]
             test_all = data_norm[test_all]
@@ -119,10 +135,27 @@ class kamitani_data_handler():
         else:
             train_data = data[train]
             test_data  =  data[test]
+            test_imag = data[test_imag]
             if(normalize==2):
-                train_data = sklearn.preprocessing.scale(train_data)
-                test_data = sklearn.preprocessing.scale(test_data)
-
+                if (scale=='standard'):
+                    train_data = sklearn.preprocessing.scale(train_data)
+                    test_data = sklearn.preprocessing.scale(test_data)
+                    test_imag = sklearn.preprocessing.scale(test_imag)
+                elif (scale=='robust'):
+                    train_data = sklearn.preprocessing.robust_scale(train_data)
+                    test_data = sklearn.preprocessing.robust_scale(test_data)
+                    test_imag = sklearn.preprocessing.robust_scale(test_imag)
+        threshes  = []
+        if (remove_outliers == 2):
+            q3, q1 = np.percentile(train_data, [75, 25], axis=0)
+            iqr = q3 - q1
+            tl = q1 - 1.5*iqr
+            th  = q3 + 1.5*iqr
+            for i in range(train_data.shape[1]):
+                train_data[train_data[:, i] <= tl[i], i] = tl[i]
+                train_data[train_data[:, i] >= th[i], i] = th[i]
+                test_data[test_data[:, i] <= tl[i], i] = tl[i]
+                test_data[test_data[:, i] >= th[i], i] = th[i]
 
         if(self.log ==2):
             train_data = np.log(1+np.abs(train_data))*np.sign(train_data)
@@ -156,11 +189,13 @@ class kamitani_data_handler():
         else:
             return train_data, test_data, test_data_avg
 
-    def get_voxel_loc(self):
+    def get_voxel_loc(self, roi='ROI_VC'):
+        roi_select = self.get_meta_field(roi).astype(bool)
         x = self.get_meta_field('voxel_x')
         y = self.get_meta_field('voxel_y')
         z = self.get_meta_field('voxel_z')
         xyz = np.vstack((x, y, z)) # I added this line, before it was being returned as list instead of ndarray
+        xyz = xyz[:, roi_select]
         dim = [int(x.max() -x.min()+1),int(y.max() -y.min()+1), int(z.max() -z.min()+1)]
         return xyz, dim
 

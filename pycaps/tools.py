@@ -23,7 +23,7 @@ def squash(inputs, axis=-1):
         inputs (tensor): A tensor of input vectors to squash. Note if inputs,
             are capsules, must flatten capsule matrices into vectors first
         axis (int): The axis along which to do the norm calculation. Default
-            is the last axis
+            is the last axis. Can also pass a list of axes
     '''
     inputs_norm = tf.norm(inputs, axis=axis, keepdims=True)
     return tf.square(inputs_norm)/(1 + tf.square(inputs_norm)) * (inputs/inputs_norm)
@@ -35,6 +35,7 @@ def arg_2_list(input_arg, n=2, fill='repeat'):
         input_arg (int, list or tuple): The input argument to be transformed.
             Must be 1 dimensional, and either length 1 or n.
         n (int): The length of the list
+        fill (string): What to fill the additional elements with
 
     Returns:
         output (list): A list of length n, If value in input list is x,
@@ -216,3 +217,80 @@ def add_coordinates(votes, pose_coords):
 
     return offset_votes
 
+# The following functions were just borrowed from Gaziv et al
+def _weights(net_layers, layer, expected_layer_name):
+    """ Return the weights and biases trained by VGG
+    """
+    W = net_layers[0][layer][0][0][2][0][0]
+    b = net_layers[0][layer][0][0][2][0][1]
+    layer_name = net_layers[0][layer][0][0][0][0]
+    assert layer_name == expected_layer_name
+    return W, b.reshape(b.size)
+
+def conv2d_relu_(prev_layer,net_layers, layer, layer_name,stride=1, pad=None):
+    """ Return the Conv2D layer with RELU using the weights, biases from the VGG
+    model at 'layer'.
+    Inputs:
+        net_layers: holding all the layers of VGGNet
+        prev_layer: the output tensor from the previous layer
+        layer: the index to current layer in net_layers
+        layer_name: the string that is the name of the current layer.
+                    It's used to specify variable_scope.
+
+    Output:
+        relu applied on the convolution.
+    """
+    W, b = _weights(net_layers, layer, layer_name)
+    W = tf.constant(W, name='weights')
+    print(W.shape)
+    b = tf.constant(b, name='bias')
+
+    conv2d = tf.nn.conv2d(prev_layer, filters=W, strides=[1, stride, stride, 1], padding='SAME')
+    return tf.nn.relu(conv2d + b)
+
+# Old Functions that are no longer needed
+def _to_blocks(self, inputs): # This was no longer needed once I found tf.image.extract_patches
+    '''Transforms inputs into blocks based on kernel size
+
+    Uses the kernel size to transform the inputs into the block
+    form. Can be used on either poses or activations
+
+    Args:
+        inputs (tensor): The poses of the input capsules with
+            dim 0 must be batch size, dim 1 must be image height and
+            dim 2 must be image width
+            [batch_size, im_h, im_w, num_caps] + remaining_shape
+    Returns:
+        blocks (tuple): A tensor containing the inputs in block form
+    '''
+
+    #input_shape = inputs.shape
+    input_shape = tf.shape(inputs)
+
+    # Get number of steps for both height and width
+    # h_steps = int((input_shape[1] - self.kernel_dim[0] + 1)/self.strides[0])
+    # w_steps = int((input_shape[2] - self.kernel_dim[1] + 1)/self.strides[1])
+    h_steps = tf.cast((input_shape[1] - self.kernel_dim[0] + 1)/self.strides[0], dtype=tf.int32)
+    w_steps = tf.cast((input_shape[2] - self.kernel_dim[1] + 1)/self.strides[1], dtype=tf.int32)
+
+    # Each block or capsules has volume k_h * k_w * num_input_channels
+    # There is one block for each output capsule
+    blocks = []
+    for h_step in range(h_steps): # iterate vertically
+        row = h_step*self.strides[0]
+        row_of_blocks = []
+        for w_step in range(w_steps): # iterate horizontally
+            col = w_step*self.strides[1]
+            # pose_block shape: [batch_size, h_kernel, w_kernel, num_input_channels] + input_caps_dim
+            block = inputs[:, row:row+self.kernel_dim[0], col:col+self.kernel_dim[1]] 
+
+            # Add two empty dims for new_im_height and new_im_width
+            block = tf.expand_dims(tf.expand_dims(block, axis=1), axis=1)
+            row_of_blocks.append(block) # Create a row of pose_blocks
+
+        # Append rows together to create a 2d matrix/image of pose blocks
+        blocks.append(tf.concat(row_of_blocks, axis=2)) 
+
+    blocks = tf.concat(blocks, axis=1) # Concat blocks from list into a tensor
+
+    return blocks # shape: [batch_size, im_height=h_steps, im_width=w_steps, k_h, k_w, num_input_channels] + remaining shape

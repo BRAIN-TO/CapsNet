@@ -1,5 +1,5 @@
 import tensorflow as tf
-import tools
+import pycaps.tools as tools
 import math
 
 '''Routing
@@ -12,7 +12,6 @@ In This File:
 -EM Routing
 
 TO-DO:
--Maybe modify dynamic routing such that capsules do not need to be flattened
 -Explore Leaky Routing
 '''
 
@@ -31,47 +30,45 @@ def dynamic_routing(votes, num_iter=3, priors=None):
             If left as none, all priors will be set to zero which results
             in equal couplind coefficients. Should have same shape as votes
     '''
-    # Flatten capsules into vectors
-    input_shape = votes.shape
-    vec_len = input_shape[-1] * input_shape[-2]
-    u = tf.reshape(votes, shape=tf.concat([[-1], list(input_shape[1:-2]), [vec_len]], axis=-1))
+    input_shape = tf.shape(votes) # [batch] + spatial_dims + [num_votes_per_cap, caps_dim1, caps_dim2]
+    u = votes # rename votes variable to match paper notation
 
-    # Only 1 prior per vote so get rid of caps dims and replace with dim 1
-    b_shape = list(input_shape[1:-2]) # Add middle dimensions
-    b_shape.insert(0, tf.shape(votes)[0]) # Replace None with placeholder for batch_size dim
-    b_shape.append(1) # append 1
-    
+    # Only 1 prior per vote so replace both capsdims with 1
+    b_shape = tf.concat([input_shape[:-2], [1, 1]], axis=0)
+
     if priors == None: # Default, all priors zero, hence all coupling coeffs equal
         b = tf.fill(b_shape, value=0.0)
     else: # Custom priors given
-        if tf.shape(priors) == b_shape:
-            b = priors
-        elif tf.shape(priors) == b_shape[0:-1]: # [1] not added on
+        try:
             b = tf.reshape(priors, shape=b_shape)
-        else:
-            raise ValueError('Priors for Dynamic Routing are wrong shape, should have one prior per vote')
+        except ValueError:
+            print('Was unable to cast given priors for dynamic routing to the correct shape. Should have shape: ', b_shape)
 
-
-    for i in range(num_iter):
+    def _body(i, b, v_array): # A single routing iteration
         c = tf.nn.softmax(b) # Calculate coupling coefficients
-        s = tf.reduce_sum(tf.multiply(c, u), axis=-2) # Take sume over all votes multiplied by coupling coefficients
-        v = tools.squash(s, axis=-1) # Apply squash to get parent capsule predictions
+        s = tf.reduce_sum(tf.multiply(c, u), axis=-3) # Take sume over all votes multiplied by their coupling coefficients
+        v = tools.squash(s, axis=[-2, -1]) # Apply squash to get parent capsule predictions
+        v_array = v_array.write(i, v)
 
         # Last step requires multiple lines of code for clarity
-        a = tf.reduce_sum(u * tf.expand_dims(v, axis=-2), axis=-1) # Dot product of u and v is agreement
-        a = tf.expand_dims(a, axis=-1) # Need to add empty dim so that it is same shape as b
-        b = b + a # Update priors
+        a = tf.reduce_sum(u * tf.expand_dims(v, axis=-3), axis=[-2, -1]) # Dot product of u and v is agreement
+        a = tf.expand_dims(tf.expand_dims(a, axis=-1), axis=-1) # Need to add empty dims so that it is same shape as b
+        b = b + a # Update priors with agreement
+        return (i+1, b, v_array)
 
-    # reshape vectors back into two dimensional capsules.
-    shape = list(input_shape[1:-3]) # Get prefix dimensions
-    shape.insert(0, -1) # Insert -1 so that batch size remains the same
-    shape.append(input_shape[-2]) # Append the first pose dimension
-    shape.append(input_shape[-1]) # Append second pose dimension
-    capsules = tf.reshape(v, shape=shape) # Reshape vectors back into 2d
+    i = tf.constant(0, dtype=tf.int32)
+    v_array = tf.TensorArray(dtype=tf.float32, size=num_iter, clear_after_read=False)
+    _, b, v_array = tf.while_loop(
+        cond=lambda i, b, v_array: i <  num_iter,
+        body=_body,
+        loop_vars=[i, b, v_array],
+        swap_memory=True
+    )
+    # return final parent capsule predictions after all iterations
+    return v_array.read(num_iter - 1)
 
-    return capsules
-
-def em_routing(votes, activations, beta_a, beta_u, iterations=3):
+def em_routing(votes, activations, beta_a, beta_u, out_channels, iterations=3):
+    
     '''The EM Routing algorithm from the 2018 paper:
 
     Matrix Capsules with EM Routing by Geoffrey Hinton
@@ -85,26 +82,31 @@ def em_routing(votes, activations, beta_a, beta_u, iterations=3):
             each vote.
         beta_a (tensor): A discriminatively learned variable used in the
             routing. Cost of activating a capsule. 
-        beta_v (tensor): A discriminatively learned variable used in the
+        beta_u (tensor): A discriminatively learned variable used in the
             routing. Cost of not activating a capsule
+        out_channels: The number of output channels of the layer. Used to set the
+            starting values for the routing assignment matrix. For densecaps this
+            is the number of capsules
         iterations (int): The number of iterations to run the routing algorithm
     '''
     # Input Votes shape
-    # [batch_size, im_h, im_w, num_channels, num_votes_per_caps] + caps_dim # This is the memory constraint
-    # or [bacth_size, num_capsules, num_votes_per_caps] + caps_dim for densecaps
+    # [batch_size, im_h, im_w, num_channels, num_votes_per_caps] + caps_dim
+    # or [bacth_size, num_capsules, num_votes_per_caps] + caps_dim (for densecaps)
     votes_shape = tf.shape(votes)
 
-    
     # Add two extra dims to activations, one for num_output_caps and one for flattened caps_dim
-    a = tf.expand_dims(tf.expand_dims(tf.expand_dims(activations, axis=-2), axis=-1), axis=-1)
+    a = tf.expand_dims(tf.expand_dims(tf.expand_dims(activations, axis=-2), axis=-1), axis=-1, name='vote_activations')
     # a shape: [batch_size, im_h, im_w, 1, num_votes_per_cap, 1, 1] or [batch_size, 1, num_votes_per_cap, 1, 1]
 
-    # r shape: [num_channels/num_capsules, num_votes_per_caps, 1, 1]. Starts as 1/num_output_channels
-    r = tf.constant(1.0/votes.shape[-4], shape=list(votes.shape[-4:-2]) + [1, 1], dtype=tf.float32)
+    # r shape: [num_capsules/num_channels, num_votes_per_caps, 1, 1]. Starts as 1/num_out_channels or 1/num_capsules for densecaps layer
+    #r = tf.constant(1.0/votes.shape[-4], shape=list(votes.shape[-4:-2]) + [1, 1], dtype=tf.float32)
+    r = tf.fill([votes_shape[-4], votes_shape[-3]], float(1.0/out_channels))
+    r = tf.expand_dims(tf.expand_dims(r, axis=-1), axis=-1)
+    r = tf.cast(r, dtype=tf.float32, name='routing_assignment_matrix')
 
     # b shape to [1, 1, 1, num_channels, 1, 1, 1] or [1, num_capsules, 1, 1, 1] for dense layer
-    beta_a = tf.expand_dims(tf.expand_dims(tf.expand_dims(beta_a, axis=-1), axis=-1), axis=-1)
-    beta_u = tf.expand_dims(tf.expand_dims(tf.expand_dims(beta_u, axis=-1), axis=-1), axis=-1)
+    beta_a = tf.expand_dims(tf.expand_dims(tf.expand_dims(beta_a, axis=-1), axis=-1), axis=-1, name='beta_a')
+    beta_u = tf.expand_dims(tf.expand_dims(tf.expand_dims(beta_u, axis=-1), axis=-1), axis=-1, name='beta_u')
 
     # Set min and max values for inverse temperature. Hyperparams taken from Jonathon Hui Implementation
     it_min = 1.0
