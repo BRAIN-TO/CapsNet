@@ -37,7 +37,6 @@ class CapsEncoder(keras.Model):
     
     def call(self, inputs): # Define this method solely so that we can build model and print model summary
         # Propagate through encoder
-        print(np.shape(inputs))
         conv_out = self.conv(inputs)
         pose1, a1 = self.primary(conv_out)
         pose2, a2 = self.dense([pose1, a1])

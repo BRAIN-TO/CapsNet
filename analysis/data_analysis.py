@@ -79,7 +79,6 @@ for i in range(50):
     correlation.append(stats.pearsonr(y_test[i], y_pred[i])[0]) # returns correlation coefficient r and two tailed p-value
     #g_correlation.append(stats.pearsonr(y_test[i], y_pred_gaziv[i])[0])
 
-exit()
 # print(tf.shape(correlation))
 # print(['{0:0.3f}'.format(i) for i in correlation])
 voxel_corr = np.array(voxel_corr)
