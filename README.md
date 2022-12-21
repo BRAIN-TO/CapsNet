@@ -16,7 +16,6 @@ Some of the data preprocessing code was borrowed from Beliy et al. [1] in order 
 
 > [1] R. Beliy, G. Gaziv, A. Hoogi, F. Strappini, T. Golan, and M. Irani, “From voxels to pixels and back: Self-supervision in natural-image reconstruction from fMRI,” in Advances in Neural Information Processing Systems, 2019, vol. 32. Accessed: May 06, 2022. [Online]. Available: https://proceedings.neurips.cc/paper/2019/hash/7d2be41b1bde6ff8fe45150c37488ebb-Abstract.html
 
-
 ### PyCaps
 
 Contains a tensforflow implementation of Capsule networks proposed in the papers:
@@ -29,18 +28,18 @@ In the future, this could be abstracted from this research project to provide an
 API extension to tensorflow for training and experimenting with capsule networks.
 Currently includes:
 
-  - Layer subclasses for primary, convolution and class/dense capsule layers
-  - Model subclasses for the models from the original capsule network papers
-  - Loss functions used in the original papers
-  - Dynamic and EM routing algorithms
+- Layer subclasses for primary, convolution and class/dense capsule layers
+- Model subclasses for the models from the original capsule network papers
+- Loss functions used in the original papers
+- Dynamic and EM routing algorithms
 
 ### Training
 
 Contains training files and scripts used to train capsule models. Includes
 
-  - Training for capsule based image-fMRI encoding models
-  - Training for capsule based MNIST classifiers
-  - Generators used to augment data during training
+- Training for capsule based image-fMRI encoding models
+- Training for capsule based MNIST classifiers
+- Generators used to augment data during training
 
 Two different image-fMRI datasets from the following works were used to train the encoders
 
@@ -50,14 +49,13 @@ Two different image-fMRI datasets from the following works were used to train th
 
 ### Analysis
 
-Contains various scripts and notebooks that were used to analyze the data and model
-performance. Currently, there are plans to include a final analysis script showing how all the figures and metrics
-in the thesis were calculated/obtained
+Contains various scripts and notebooks that were used to analyze the data and model performance. Additionally we also provide the a final_results notebook which reproduces all of the results and figures from the thesis. We also provide some csv's of our model predictions so that users can recreate the results from from our work without having to train all the various models or use them to run inference.
 
 ### Misc
 
 Other miscellaneous files. Includes
 
-  - Data handler object for preprocessing the image-fMRI data from the Generic 
-  Object Decoding dataset [4].
-  - Functions used to load data, further preprocess data or analyze results
+- Data handler object for preprocessing the image-fMRI data from the Generic 
+Object Decoding dataset [4], a modified version of the code from [1].
+- Script for preprocessing Imagenet images, taken from [1]
+- Functions used to load data, further preprocess data or analyze results
