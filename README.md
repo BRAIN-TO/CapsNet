@@ -10,9 +10,9 @@ Dr. Kamil Uludag.
 
 ## Overview
 
-Please note that due to a restructuring, some of the current import and file paths
-may be incorrect. This will be addressed in the future. Some of the data preprocessing
-code was borrowed from Beliy et al. [1] in order to be consistent with their approach.
+For an overview of how all results and figures (including supplementary figures) in the entire thesis were obtained, please refer to the [final_results tutoiral](analysis/final_results.ipynb). For anyone interested in this work, we strongly recommend that you start with this notebook tutorial. It contains everything except model inference and training. Please note that due to a restructuring, some of the current import and file paths in the other scripts may be incorrect.
+
+Some of the data preprocessing code was borrowed from Beliy et al. [1] in order to be consistent with their approach.
 
 > [1] R. Beliy, G. Gaziv, A. Hoogi, F. Strappini, T. Golan, and M. Irani, “From voxels to pixels and back: Self-supervision in natural-image reconstruction from fMRI,” in Advances in Neural Information Processing Systems, 2019, vol. 32. Accessed: May 06, 2022. [Online]. Available: https://proceedings.neurips.cc/paper/2019/hash/7d2be41b1bde6ff8fe45150c37488ebb-Abstract.html
 

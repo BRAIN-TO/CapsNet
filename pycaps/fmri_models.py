@@ -713,4 +713,44 @@ class EncoderMach11(CapsEncoder):
             name='decoder'
         )
 
+class EncoderMach12(CapsEncoder):
+    '''The original capsule network modified to be an encoder, and with regularization stuff added in
+    '''
+    def __init__(self, num_voxels, output_activation='linear', num_output_capsules=10, routing='dynamic', caps_act='squash', dropout_rate=0.5, l1reg=1e-5, l2reg=0.001, fcregl1=10):
+        super(CapsEncoder, self).__init__()
+        self.class_name = 'CapsEncoder'
+
+        # Define layers
+        self.conv = layers.Conv2D(filters=256, kernel_size=9, strides=(1, 1), padding='valid', activation='relu', kernel_regularizer=keras.regularizers.L1L2(l1=l1reg, l2=l2reg))
+        self.norm1 = layers.BatchNormalization(axis=-1) # default is channels last
+        self.primary = caps_layers.PrimaryCaps2D(num_channels=32, kernel_size=9, capsule_dim=8, strides=2, padding='valid', activation=caps_act, kernel_regularizer=keras.regularizers.L1L2(l1=l1reg, l2=l2reg))
+        self.norm2 = layers.BatchNormalization(axis=-3)
+        self.dense = caps_layers.DenseCaps(num_capsules=num_output_capsules, capsule_dim=16, routing=routing, activation='squash', name='class_capsules', regularizer=keras.regularizers.L1L2(l1=l1reg, l2=l2reg))
+        self.norm3 = layers.BatchNormalization(axis=-3)
+        self.drop = layers.Dropout(dropout_rate)
+
+        self.decoder = keras.Sequential(
+            [
+                layers.Dense(512, activation='relu', kernel_regularizer=keras.regularizers.L1(l1=fcregl1)),
+                layers.Dense(1024, activation='relu', kernel_regularizer=keras.regularizers.L1(l1=fcregl1)),
+                layers.Dense(num_voxels, activation=output_activation, kernel_regularizer=keras.regularizers.L1(l1=fcregl1))
+            ],
+            name='decoder'
+        )
     
+    def call(self, inputs): # Define this method solely so that we can build model and print model summary
+        # Propagate through encoder
+        conv_out = self.conv(inputs)
+        conv_out = self.norm1(conv_out)
+        pose1, a1 = self.primary(conv_out)
+        pose1 = self.norm2(pose1)
+        pose2, a2 = self.dense([pose1, a1])
+        pose2 = self.norm3(pose2)
+        
+        # Reconstruct image
+        pose_shape = pose2.shape # [batch_size, num_caps, caps_dim[0], caps_dim[1]]
+        decoder_input = tf.reshape(pose2, [-1, pose_shape[1] * pose_shape[2] * pose_shape[3]])
+        decoder_input = self.drop(decoder_input)
+        y_pred = self.decoder(decoder_input)
+
+        return y_pred

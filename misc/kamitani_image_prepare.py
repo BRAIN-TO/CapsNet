@@ -4,7 +4,7 @@ import pandas as pd
 from scipy.misc import imread
 import matplotlib.pyplot as plt
 from scipy.misc import imresize
-import config_file
+import config_file # The original implementation had a config file, we mostly just pass the arguments in everytime
 import os
 
 
