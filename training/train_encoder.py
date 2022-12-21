@@ -6,7 +6,7 @@ import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 import pathlib
 capsnet_path = pathlib.Path(__file__).parent.resolve().parent.resolve()
-print('Base Dir: ', capsnet_path)
+print('Capsnet Path: ', capsnet_path)
 import sys
 sys.path.append(str(capsnet_path)) # Allows imports from capsnet folder
 import tensorflow as tf
@@ -33,8 +33,8 @@ ts = time.time()
 save = True # Whether or not to save the model
 # scale = False
 base_dir = '/cluster/projects/uludag/shawn/CapsNet/'
-#base_dir = ''
-model_name = 'caps_encoder_test5' # Model name
+# base_dir = ''
+model_name = 'encoder_mach12' # Model name
 pretrain_weights = base_dir + 'imagenet-caffe-ref.mat'
 matlab_file = base_dir + 'kamitani_data/fmri/Subject3.mat' # contains processed fmri data
 test_image_ids = base_dir + 'kamitani_data/images/image_test_id.csv'
@@ -85,7 +85,6 @@ x_train, x_test, y_train, y_test, xyz = load_data(matlab_file, test_image_ids, t
 # y_train = y_train.astype('float32')
 # y_test = y_test.astype('float32')
 
-# Center indices of bins to reflect data
 NUM_VOXELS = y_train.shape[1]
 
 # y_test, y_train, xyz = remove_low_variance_voxels(y_test, y_train, xyz, threshold=0.08)
@@ -105,8 +104,8 @@ print("Number of devices in use: {}".format(strategy.num_replicas_in_sync))
 
 with strategy.scope():
     print('Compiling Model...', flush=True)
-    model = CapsEncoder(num_voxels=NUM_VOXELS, routing='dynamic', caps_act='squash', num_output_capsules=10)
-    #model = EncoderMach11(num_voxels=NUM_VOXELS, routing='dynamic', caps_act='squash')
+    # model = CapsEncoder(num_voxels=NUM_VOXELS, routing='dynamic', caps_act='squash', num_output_capsules=10)
+    model = EncoderMach12(num_voxels=NUM_VOXELS, routing='dynamic', caps_act='squash', num_output_capsules=2)
     print('model type: ', model.class_name)
     model.compile(
         optimizer=optimizer,
@@ -142,7 +141,7 @@ if training_params['lr_schedule']:
 else:
     callbacks=[]
 
-if save:
+if save: # need to fix this as well
     if not os.path.exists(os.path.join('models', model_name)):
         os.makedirs(os.path.join('models', model_name))
     model_checkpoint_callback = keras.callbacks.ModelCheckpoint(
@@ -167,30 +166,30 @@ training = model.fit(train_gen,
 ###############################################################################
 testing = model.evaluate(x_test, y_test, batch_size=training_params['val_batch_size'], return_dict=True)
 
-# Model Saving
-# Model Saving
+# Model Saving (Need to edit this bc we want output path on cluster to be diff)
 if save:
     # Save full model. Also save weights
-    model.save_weights(os.path.join(capsnet_path, 'trained_models', model_name, 'model_weights'), save_format='tf')
+    model.save_weights(os.path.join(base_dir, 'trained_models', model_name, 'model_weights'), save_format='tf')
+
+    with open(os.path.join(base_dir, 'trained_models', model_name, 'train_config.yaml'), 'w') as file:
+        yaml.dump(training_params, file) # Save archetecture
+
+    with open(os.path.join(base_dir, 'trained_models', model_name, 'config.yaml'), 'w') as file:
+        yaml.dump(model.get_config(), file) # Save archetecture
+
+    with open(os.path.join(base_dir, 'trained_models', model_name, 'test-history.json'), 'w') as file:
+        json.dump(testing, file) # save testing history
+
     plt.plot(training.history['loss'])
     plt.plot(training.history['val_loss'])
     plt.legend(['train_loss', 'val_loss'])
-    plt.savefig(os.path.join(capsnet_path, 'trained_models', model_name, '/val_loss.png'))
-
-    with open(os.path.join(capsnet_path, 'trained_models', model_name, 'train_config.yaml'), 'w') as file:
-        yaml.dump(training_params, file) # Save archetecture
-
-    with open(os.path.join(capsnet_path, 'trained_models', model_name, 'config.yaml'), 'w') as file:
-        yaml.dump(model.get_config(), file) # Save archetecture
-
-    with open(os.path.join(capsnet_path, 'trained_models', model_name, 'test-history.json'), 'w') as file:
-        json.dump(testing, file) # save testing history
+    plt.savefig(os.path.join(base_dir, 'trained_models', model_name, '/val_loss.png'))
         
     # convert lr to float64
     if 'lr' in training.history.keys():
         training.history['lr'] = [np.float64(lr) for lr in training.history['lr']]
 
-    with open(os.path.join(capsnet_path, 'trained_models', model_name, '/train-history.json'), 'w') as file:
+    with open(os.path.join(base_dir, 'trained_models', model_name, '/train-history.json'), 'w') as file:
         json.dump(training.history, file) # save training history
 
 print('Total Runtime: ', time.time() - ts)

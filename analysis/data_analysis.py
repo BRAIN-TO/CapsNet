@@ -54,8 +54,8 @@ print(NUM_VOXELS)
 # model = CapsEncoder(num_voxels=NUM_VOXELS, num_output_capsules=10)
 # model = EncoderMach3(NUM_VOXELS)
 # print(model.class_name)
-# model.load_weights('../trained_models/' + model_name + '/model_weights').expect_partial()
-# model.load_weights('../trained_models/' + model_name + '/best_ckpt').expect_partial()
+# model.load_weights(os.path.join(base_dir, 'trained_models', model_name, 'model_weights')).expect_partial()
+# model.load_weights(os.path.join(base_dir, 'trained_models', model_name, 'best_ckpt')).expect_partial()
 
 # Calculating model predictions
 # print('Getting Model Predictions...')
@@ -79,7 +79,6 @@ for i in range(50):
     correlation.append(stats.pearsonr(y_test[i], y_pred[i])[0]) # returns correlation coefficient r and two tailed p-value
     #g_correlation.append(stats.pearsonr(y_test[i], y_pred_gaziv[i])[0])
 
-exit()
 # print(tf.shape(correlation))
 # print(['{0:0.3f}'.format(i) for i in correlation])
 voxel_corr = np.array(voxel_corr)
@@ -87,9 +86,9 @@ vc_p = np.array(vc_p)
 print('Mean Sample Correlation: ', np.mean(correlation))
 
 print('Mean Voxel Correlation: ', np.mean(voxel_corr))
-print(np.mean(np.square(y_pred - y_test)))
-cos = cosine_similarity(y_test, y_pred)
-print(np.mean(cos))
+# print(np.mean(np.square(y_pred - y_test)))
+# cos = cosine_similarity(y_test, y_pred)
+# print(np.mean(cos))
 
 stds = np.std(y_pred, axis=0)
 stdtest = np.std(y_test, axis=0)
@@ -231,8 +230,8 @@ matplotlib.rcParams.update({'font.size': 16})
 # plt.xlabel('Voxel Response Sensitivity')
 # plt.ylabel('Voxelwise Correlation')
 # plt.colorbar()
-# # plt.savefig(os.path.join('models', model_name, 'corr_std.png'), bbox_inches='tight', facecolor='white')
-# # plt.savefig(os.path.join('figures', 'mean_corr_std_imagenet.png'), bbox_inches='tight', facecolor='white')
+# plt.savefig(os.path.join('models', model_name, 'corr_std.png'), bbox_inches='tight', facecolor='white')
+# plt.savefig(os.path.join('figures', 'mean_corr_std_imagenet.png'), bbox_inches='tight', facecolor='white')
 # plt.tight_layout()
 # plt.show()
 
@@ -281,44 +280,44 @@ matplotlib.rcParams.update({'font.size': 16})
 # nibabel.save(nifti, 'nifti/sub03_train_mean.nii.gz')
 # nibabel.save(nifti, 'nifti/' + 'sub03_s4.nii.gz')
 
-handler = kamitani_data_handler(matlab_file=matlab_file, test_img_csv=test_image_ids, train_img_csv=train_image_ids)
-print(handler.get_meta_keys())
+# handler = kamitani_data_handler(matlab_file=matlab_file, test_img_csv=test_image_ids, train_img_csv=train_image_ids)
+# print(handler.get_meta_keys())
 
-roi_names = ['ROI_V1', 'ROI_V2', 'ROI_V3', 'ROI_V4', 'ROI_LOC', 'ROI_FFA', 'ROI_PPA', 'ROI_LVC', 'ROI_HVC']
-vc_rs = voxel_corr * stds
-rwc = np.sign(vc_rs)*np.sqrt(abs(vc_rs))
+# roi_names = ['ROI_V1', 'ROI_V2', 'ROI_V3', 'ROI_V4', 'ROI_LOC', 'ROI_FFA', 'ROI_PPA', 'ROI_LVC', 'ROI_HVC']
+# vc_rs = voxel_corr * stds
+# rwc = np.sign(vc_rs)*np.sqrt(abs(vc_rs))
 
-vc_beliy = np.loadtxt(os.path.join(base_dir, 'trained_models/beliy/beliy_vox_corr.csv'), delimiter=',')
-vc_rs_beliy = vc_beliy * np.std(y_pred_gaziv, axis=0)
-rwc_beliy = np.sign(vc_rs_beliy)*np.sqrt(abs(vc_rs_beliy))
+# vc_beliy = np.loadtxt(os.path.join(base_dir, 'trained_models/beliy/beliy_vox_corr.csv'), delimiter=',')
+# vc_rs_beliy = vc_beliy * np.std(y_pred_gaziv, axis=0)
+# rwc_beliy = np.sign(vc_rs_beliy)*np.sqrt(abs(vc_rs_beliy))
 
-roi_metrics = {'rwc': [], 'vc': [], 'rs': []}
-roi_metrics_beliy = {'rwc': [], 'vc': [], 'rs': []}
-for roi in roi_names:
-    select = handler.get_meta_field(roi).astype(bool)
-    print(roi)
-    print(np.mean(rwc[select]), np.mean(voxel_corr[select]), np.mean(stds[select]))
-    roi_metrics['rwc'].append(rwc[select])
-    roi_metrics_beliy['rwc'].append(rwc_beliy[select])
-    roi_metrics['vc'].append(voxel_corr[select])
-    roi_metrics_beliy['vc'].append(vc_beliy[select])
-    roi_metrics['rs'].append(stds[select])
-    roi_metrics_beliy['rs'].append(np.std(y_pred_gaziv, axis=0)[select])
+# roi_metrics = {'rwc': [], 'vc': [], 'rs': []}
+# roi_metrics_beliy = {'rwc': [], 'vc': [], 'rs': []}
+# for roi in roi_names:
+#     select = handler.get_meta_field(roi).astype(bool)
+#     print(roi)
+#     print(np.mean(rwc[select]), np.mean(voxel_corr[select]), np.mean(stds[select]))
+#     roi_metrics['rwc'].append(rwc[select])
+#     roi_metrics_beliy['rwc'].append(rwc_beliy[select])
+#     roi_metrics['vc'].append(voxel_corr[select])
+#     roi_metrics_beliy['vc'].append(vc_beliy[select])
+#     roi_metrics['rs'].append(stds[select])
+#     roi_metrics_beliy['rs'].append(np.std(y_pred_gaziv, axis=0)[select])
 
-roi_names = ['V1', 'V2', 'V3', 'V4', 'LOC', 'FFA', 'PPA', 'LVC', 'HVC']
-# plt.bar(roi_names, np.mean(roi_metrics_beliy['vc']))
-# plt.bar(roi_names, np.mean(roi_metrics['vc']))
+# roi_names = ['V1', 'V2', 'V3', 'V4', 'LOC', 'FFA', 'PPA', 'LVC', 'HVC']
+# plt.bar(roi_names, [np.mean(roi_metrics_beliy['vc'][roi_index]) for roi_index in range(len(roi_names))])
+# plt.bar(roi_names, [np.mean(roi_metrics['vc'][roi_index]) for roi_index in range(len(roi_names))])
 # # plt.ylabel('Response Weighted Correlation')
 # plt.ylabel('Voxelwise Correlation')
 # plt.legend(['Beliy 2019', 'Capsule'])
 # plt.tight_layout()
 # plt.show()
 
-plt.violinplot(roi_metrics_beliy['vc'])
-plt.violinplot(roi_metrics['vc'])
-ax = plt.gca()
-ax.set_xticks(np.arange(1, len(roi_names) + 1), labels=roi_names)
-# plt.ylabel('Response Weighted Correlation')
-plt.ylabel('Voxelwise Correlation')
-plt.tight_layout()
-plt.show()
+# plt.violinplot(roi_metrics_beliy['vc'])
+# plt.violinplot(roi_metrics['vc'])
+# ax = plt.gca()
+# ax.set_xticks(np.arange(1, len(roi_names) + 1), labels=roi_names)
+# # plt.ylabel('Response Weighted Correlation')
+# plt.ylabel('Voxelwise Correlation')
+# plt.tight_layout()
+# plt.show()

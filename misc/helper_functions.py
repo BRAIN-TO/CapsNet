@@ -1,6 +1,5 @@
 import pathlib
 capsnet_path = pathlib.Path(__file__).parent.resolve().parent.resolve()
-print('Base Dir: ', capsnet_path)
 import sys
 sys.path.append(str(capsnet_path)) # Allows imports from capsnet folder
 from misc.kamitani_data_handler import kamitani_data_handler
