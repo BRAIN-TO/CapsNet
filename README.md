@@ -8,6 +8,8 @@ submitted in conformity with the requirements for the degree of Master of Scienc
 Department of Medical Biophysics, University of Toronto under the supervision of
 Dr. Kamil Uludag.
 
+The paper can be found [here](https://tspace.library.utoronto.ca/handle/1807/128124)
+
 ## Overview
 
 For an overview of how all results and figures (including supplementary figures) in the entire thesis were obtained, please refer to the [final_results tutoiral](analysis/final_results.ipynb). For anyone interested in this work, we strongly recommend that you start with this notebook tutorial. It contains everything except model inference and training. Please note that due to a restructuring, some of the current import and file paths in the other scripts may be incorrect.
